@@ -19,12 +19,32 @@ const port = process.env.PORT || 5173;
 const jwtSecret = process.env.JWT_SECRET || 'change-this-development-jwt-secret';
 let databaseConnected = false;
 
-if (process.env.MONGO_URI) {
-  mongoose.connect(process.env.MONGO_URI)
+function normalizeUri(value) {
+  if (!value || typeof value !== 'string') return value;
+  let trimmed = value.replace(/^\uFEFF/, '').trim();
+  trimmed = trimmed.replace(/^(?:export\s+)?(?:MONGO_URI|MONGODB_URI|MONGO_URL)\s*[:=]\s*/i, '').trim();
+  trimmed = trimmed.replace(/^[\"'\u2018\u2019\u201c\u201d]+|[\"'\u2018\u2019\u201c\u201d]+$/g, '').trim();
+  return trimmed.replace(/^[\s\uFEFF\u200B\u200C\u200D]+|[\s\uFEFF\u200B\u200C\u200D]+$/gu, '');
+}
+
+function maskMongoUri(uri) {
+  if (!uri || typeof uri !== 'string') return uri;
+  return uri.replace(/^(mongodb(?:\+srv)?:\/\/)([^:]+):([^@]+)@/, '$1$2:*****@');
+}
+
+const rawMongoUri = process.env.MONGO_URI || process.env.MONGODB_URI || process.env.MONGO_URL || (process.env.NODE_ENV === 'production' ? null : 'mongodb://127.0.0.1:27017/whatsapp_messaging_bot');
+const mongoUri = normalizeUri(rawMongoUri);
+console.log('MongoDB configuration:', {
+  source: process.env.MONGO_URI ? 'MONGO_URI' : process.env.MONGODB_URI ? 'MONGODB_URI' : process.env.MONGO_URL ? 'MONGO_URL' : 'default',
+  uri: maskMongoUri(mongoUri)
+});
+
+if (mongoUri) {
+  mongoose.connect(mongoUri)
     .then(() => { databaseConnected = true; console.log('MongoDB connected.'); })
     .catch(error => console.error('MongoDB connection error:', error.message));
 } else {
-  console.log('MongoDB is not configured. Copy .env.example to .env and set MONGO_URI.');
+  console.log('MongoDB is not configured. Set MONGO_URI, MONGODB_URI, or MONGO_URL in environment variables.');
 }
 
 // Keep the dashboard available if the WhatsApp Web session closes or expires.
@@ -130,7 +150,7 @@ const upload = multer({ storage, limits: { fileSize: 25 * 1024 * 1024 } }); // 2
 app.get('/api/auth/status', (_req, res) => res.json({ databaseConnected }));
 
 app.post('/api/auth/register', async (req, res) => {
-  if (!databaseConnected) return res.status(503).json({ error: 'MongoDB is not connected. Configure MONGO_URI in .env.' });
+  if (!databaseConnected) return res.status(503).json({ error: 'MongoDB is not connected. Set MONGO_URI, MONGODB_URI, or MONGO_URL in environment variables.' });
   const { name, email, password } = req.body || {};
   if (!name || !email || !password || password.length < 6) return res.status(400).json({ error: 'Name, email, and a password of at least 6 characters are required.' });
   try {
@@ -143,7 +163,7 @@ app.post('/api/auth/register', async (req, res) => {
 });
 
 app.post('/api/auth/login', async (req, res) => {
-  if (!databaseConnected) return res.status(503).json({ error: 'MongoDB is not connected. Configure MONGO_URI in .env.' });
+  if (!databaseConnected) return res.status(503).json({ error: 'MongoDB is not connected. Set MONGO_URI, MONGODB_URI, or MONGO_URL in environment variables.' });
   const { email, password } = req.body || {};
   const user = await User.findOne({ email: String(email || '').toLowerCase() });
   if (!user || !(await bcrypt.compare(password || '', user.passwordHash))) return res.status(401).json({ error: 'Incorrect email or password.' });
