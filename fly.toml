@@ -1,0 +1,20 @@
+app = "whatsapp-group-messaging-bot"
+
+kill_signal = "SIGINT"
+kill_timeout = 5
+processes = []
+
+[build]
+  image = "dockerfile"
+
+[env]
+  PUPPETEER_EXECUTABLE_PATH = "/usr/bin/chromium"
+  CHROME_BIN = "/usr/bin/chromium"
+
+[[mounts]]
+  source = "whatsapp-auth"
+  destination = "/app/.wwebjs_auth"
+
+[[mounts]]
+  source = "whatsapp-cache"
+  destination = "/app/.wwebjs_cache"

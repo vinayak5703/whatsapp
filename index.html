@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WhatsApp Messaging Bot</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+    <style>
+      .module-page{display:none}.module-page input,.module-page textarea,.module-page select{width:100%;border:1px solid #dce2e6;border-radius:5px;padding:10px;font:14px 'DM Sans',sans-serif}.module-page textarea{min-height:100px;resize:vertical}.module-page .compose label{display:block;margin:12px 0 7px;font-weight:600}.module-page .dashboard-grid{grid-template-columns:360px 1fr}.module-page .stat-grid{grid-template-columns:repeat(3,1fr)}.danger-btn,.text-btn{border:0;background:none;cursor:pointer;font:600 13px 'DM Sans',sans-serif}.danger-btn{color:#dc383d}.text-btn{color:#078c56}@media(max-width:760px){.module-page .dashboard-grid,.module-page .stat-grid{grid-template-columns:1fr}}
+      .login-screen{position:fixed;inset:0;z-index:100;background:#f7fbfa;display:grid;grid-template-columns:48% 52%;font-family:'DM Sans',sans-serif}.login-screen.hidden{display:none}.login-art{background:radial-gradient(circle at 20% 20%,#0d8c67,#043c38 55%,#022c2a);color:white;padding:11vh 12%;position:relative;overflow:hidden}.login-art:after{content:'';position:absolute;width:520px;height:520px;border:1px solid #ffffff2e;border-radius:50%;right:-220px;bottom:-260px;box-shadow:0 0 0 60px #ffffff08,0 0 0 120px #ffffff06}.login-logo{width:58px;height:58px;border:3px solid white;border-radius:50%;display:grid;place-items:center;font-size:38px;transform:rotate(-25deg)}.login-art h1{font:600 45px/1.05 Outfit,sans-serif;margin:34px 0 16px}.login-art p{max-width:360px;font-size:17px;line-height:1.6;color:#d7efea}.login-points{display:grid;gap:14px;margin-top:44px;color:#e8fbf7;font-weight:500}.login-panel{display:grid;place-items:center;padding:30px}.login-form{width:min(410px,100%)}.eyebrow{font-size:11px;font-weight:700;letter-spacing:1.6px;color:#00a86b}.login-form h2{font:600 30px Outfit,sans-serif;margin:13px 0 8px}.login-form>p{color:#71808e;margin:0 0 27px}.login-form label{display:block;margin:17px 0 7px;font-size:13px;font-weight:600}.login-form input{width:100%;padding:13px 14px;border:1px solid #dce5e3;border-radius:7px;font:14px 'DM Sans',sans-serif;outline-color:#00a86b}.login-submit{width:100%;margin-top:24px;padding:13px}.auth-switch{text-align:center!important;margin:20px 0 0!important;font-size:13px}.auth-switch button{border:0;background:none;color:#008f5b;font-weight:700;cursor:pointer}.auth-error{color:#d53d45!important;min-height:20px;margin-top:12px!important;font-size:13px}.hidden{display:none!important}@media(max-width:760px){.login-screen{display:block}.login-art{display:none}.login-panel{min-height:100vh;padding:24px}.login-form h2{font-size:27px}}
+      .logout-btn{border:1px solid #dce5e3;background:#fff;border-radius:6px;padding:8px 12px;color:#47535d;font:600 12px 'DM Sans',sans-serif;cursor:pointer}.logout-btn:hover{border-color:#00a86b;color:#008d59}
+      /* Premium midnight palette */
+      body{background:#f5f6ff!important;color:#18203a}.sidebar{background:linear-gradient(165deg,#170a3d,#081d48 58%,#0b3157)!important}.brand-mark{border-color:#62f2e4!important;color:#62f2e4!important;box-shadow:0 0 25px #62f2e455}.nav-item.active,.nav-item:hover{background:linear-gradient(100deg,#6935e5,#167de0)!important;box-shadow:0 8px 20px #080e3638}.plan-card{border-color:#5461bd!important;background:#ffffff0a}.plan-card button,.primary,.secondary{background:linear-gradient(100deg,#7646e8,#1f93e7)!important;box-shadow:0 7px 16px #4434b238}.topbar{background:#ffffffd9!important;backdrop-filter:blur(12px)}.breadcrumb span,.card-heading a,.text-btn{color:#6840d7!important}.stat-card{box-shadow:0 8px 22px #252a4d10}.green{background:linear-gradient(135deg,#e8faff,#e8f0ff)!important;border-color:#bddeed!important;color:#1682bf!important}.green em{background:linear-gradient(135deg,#31cbd7,#4c7fff)!important;color:#fff!important}.blue{background:linear-gradient(135deg,#f0edff,#e8f8ff)!important;border-color:#d6cff7!important;color:#7047e9!important}.blue em{background:linear-gradient(135deg,#8b55ed,#3b8ef4)!important}.amber{background:linear-gradient(135deg,#fff2e8,#fff7d6)!important;border-color:#f6ddbc!important;color:#e47738!important}.amber em{background:linear-gradient(135deg,#ff8a5d,#f9bd37)!important}.red{background:linear-gradient(135deg,#ffecf2,#fff0f1)!important;border-color:#f5cad8!important;color:#e64372!important}.red em{background:linear-gradient(135deg,#f44a87,#ff755d)!important}.tag{background:#e9e7ff!important;color:#5d3fc7!important}.login-art{background:radial-gradient(circle at 18% 20%,#854ced,#1c0d52 58%,#071c45)!important}.login-logo{border-color:#75f9e8!important;color:#75f9e8!important;box-shadow:0 0 28px #67f5e870}.eyebrow{color:#7045df!important}.login-form input:focus{box-shadow:0 0 0 4px #7045df18}.login-submit{background:linear-gradient(100deg,#7548e8,#168fe2)!important}.logout-btn:hover{border-color:#7045df!important;color:#5e38c8!important}
+    </style>
+  </head>
+  <body>
+    <section class="login-screen" id="loginScreen">
+      <div class="login-art"><div class="login-logo">◔</div><h1>WhatsApp<br>Messaging Bot</h1><p>One secure space for groups, broadcasts and delivery insights.</p><div class="login-points"><span>✓&nbsp; Live WhatsApp groups</span><span>✓&nbsp; Controlled bulk messaging</span><span>✓&nbsp; Delivery activity reports</span></div></div>
+      <div class="login-panel"><div class="login-form"><span class="eyebrow">WELCOME BACK</span><h2 id="authTitle">Sign in to your account</h2><p id="authSub">Manage every conversation from one dashboard.</p><form id="authForm"><div id="nameField" class="hidden"><label>Full name</label><input name="name" placeholder="Your full name" /></div><label>Email address</label><input name="email" type="email" required placeholder="you@example.com" /><label>Password</label><input name="password" type="password" required minlength="6" placeholder="Minimum 6 characters" /><button class="primary login-submit" id="authSubmit">Sign In</button></form><p class="auth-switch" id="authSwitch">New here? <button>Create an account</button></p><p class="auth-error" id="authError"></p></div></div>
+    </section>
+    <div class="app-shell">
+      <aside class="sidebar" id="sidebar">
+        <a class="brand" href="#dashboard"><span class="brand-mark">◔</span><span>WhatsApp<small>Messaging Bot</small></span></a>
+        <nav class="nav" id="navigation">
+          <a class="nav-item active" href="#dashboard" data-page="Dashboard"><span>⌂</span>Dashboard</a>
+          <a class="nav-item" href="#groups" data-page="Groups"><span>♟</span>Groups</a>
+          <a class="nav-item" href="#send" data-page="Send Message"><span>➤</span>Send Message</a>
+          <a class="nav-item" href="#scheduled" data-page="Scheduled Messages"><span>◷</span>Scheduled Messages</a>
+          <a class="nav-item" href="#templates" data-page="Message Templates"><span>▤</span>Message Templates</a>
+          <a class="nav-item" href="#logs" data-page="Delivery Logs"><span>▣</span>Logs</a>
+          <a class="nav-item" href="#reports" data-page="Reports & Analytics"><span>▥</span>Reports</a>
+          <a class="nav-item" href="#users" data-page="User Management"><span>♙</span>Users</a>
+          <a class="nav-item" href="#settings" data-page="Settings"><span>⚙</span>Settings</a>
+        </nav>
+        <div class="plan-card"><strong>♛ &nbsp; Plan</strong><span>Valid till : 31 Dec 2026</span><button>Upgrade Plan</button></div>
+      </aside>
+      <main class="main">
+        <header class="topbar"><button class="icon-btn menu" id="menuBtn">☰</button><h1 id="pageTitle">Dashboard</h1><div class="top-actions"><button class="bell">♧<i>3</i></button><div class="avatar">AU</div><div class="profile"><b>Admin User</b><span>Administrator</span></div><button class="logout-btn" id="logoutBtn">Logout</button></div></header>
+        <section class="content" id="dashboard">
+          <div class="breadcrumb"><span>Home</span> / <b id="crumb">Dashboard</b></div>
+          <div class="stat-grid">
+            <article class="stat-card green"><div><span>Total Groups</span><strong id="groupTotal">0</strong><small>Active Groups</small></div><em>♟</em><footer>View all groups <b>→</b></footer></article>
+            <article class="stat-card blue"><div><span>Messages Sent</span><strong id="messagesTotal">0</strong><small>Delivery attempts</small></div><em>➤</em><footer>View reports <b>→</b></footer></article>
+            <article class="stat-card amber"><div><span>Successful</span><strong id="messagesSuccess">0</strong><small id="successRate">No deliveries yet</small></div><em>✓</em><footer>View details <b>→</b></footer></article>
+            <article class="stat-card red"><div><span>Failed</span><strong id="messagesFailed">0</strong><small id="failedRate">No failures yet</small></div><em>×</em><footer>View logs <b>→</b></footer></article>
+          </div>
+          <div class="dashboard-grid">
+            <section class="card compose"><h2>Quick Send Message</h2><label>Message</label><textarea id="message" maxlength="1000" placeholder="Type your message here..."></textarea><span class="count"><b id="count">0</b>/1000</span><label>Select Groups</label><div class="group-select"><select><option>Select groups</option><option>Sales Team</option><option>Marketing Team</option><option>HR Team</option></select><button class="secondary">Select Groups</button></div><div class="attach-block"><label>Attachments</label><input id="quickAttachments" type="file" multiple accept="image/*,video/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"/><div id="quickAttachmentsPreview" style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"></div><p style="color:#71808e;font-size:12px;margin-top:8px">You can attach images, PDFs or documents (max 25MB per file). Message text will be added as a caption to the first attachment.</p></div><div class="radio-row"><label><input type="radio" name="time" checked /> Send Now</label><label><input type="radio" name="time" /> Schedule Later</label></div><div class="form-actions"><button class="primary" id="sendBtn">➤ &nbsp; Send Message</button><button class="outline" id="clearBtn">Clear</button></div></section>
+            <section class="card activity"><div class="card-heading"><h2>Recent Activity</h2><a href="#logs">View all</a></div><div id="activityList"></div></section>
+          </div>
+          <section class="card scheduled" id="scheduled"><div class="card-heading"><h2>Scheduled Messages</h2><button class="primary compact" id="scheduleBtn">＋ New Schedule</button></div><div class="table-wrap"><table><thead><tr><th>ID</th><th>Message</th><th>Groups</th><th>Schedule Time</th><th>Status</th><th>Actions</th></tr></thead><tbody id="scheduleRows"></tbody></table></div></section>
+        </section>
+        <section class="module-page" id="otherPage"></section>
+      </main>
+    </div>
+    <div class="modal-backdrop" id="modal"><div class="modal"><button class="close" id="closeModal">×</button><h2>Create Schedule</h2><p>Schedule a message to selected WhatsApp groups.</p><label>Message</label><textarea id="scheduleMessage" placeholder="Enter your message"></textarea><label>Delivery time</label><input id="scheduleTime" type="datetime-local" /><button class="primary full" id="saveSchedule">Save Schedule</button></div></div>
+    <div class="toast" id="toast">Message queued for delivery!</div>
+    <script>
+      (function ensureAttachments(){
+        function insertIfMissing(){
+          try{
+            const form = document.getElementById('bulk');
+            if (!form) return;
+            if (document.getElementById('attachments')) return; // already present
+            const sel = form.querySelector('select[name="target"]') || form.querySelector('select');
+            if (!sel) return;
+            const attachHtml = `<label>Attachments</label><input id="attachments" name="attachments" type="file" multiple accept="image/*,video/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"/><div id="attachmentsPreview" style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"></div>`;
+            sel.insertAdjacentHTML('afterend', attachHtml);
+          }catch(e){console.error('ensureAttachments error',e)}
+        }
+        window.addEventListener('hashchange', insertIfMissing);
+        document.addEventListener('DOMContentLoaded', function(){ insertIfMissing(); setTimeout(insertIfMissing, 120); });
+        // expose for manual use from console
+        window.__ensureAttachments = insertIfMissing;
+      })();
+    </script>
+    <script src="app.js?v=20260728T140900"></script>
+    <script src="connector.js?v=20260728T140900"></script>
+    <script src="recipient-selector.js?v=20260728T140900"></script>
+    <script src="directory.js?v=20260728T140900"></script>
+    <script src="live-ui.js?v=20260728T140900"></script>
+    <script src="auth.js?v=20260728T140900"></script>
+  </body>
+</html>
