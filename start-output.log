@@ -1,0 +1,20 @@
+MongoDB configuration: {
+  source: 'MONGO_URI',
+  uri: 'mongodb://127.0.0.1:27017/whatsapp_messaging_bot'
+}
+Dashboard: http://127.0.0.1:5173
+MongoDB connected.
+WhatsApp QR generated.
+WhatsApp QR generated. Open the dashboard and scan it.
+WhatsApp QR generated.
+WhatsApp QR generated. Open the dashboard and scan it.
+WhatsApp QR generated.
+WhatsApp QR generated. Open the dashboard and scan it.
+WhatsApp QR generated.
+WhatsApp QR generated. Open the dashboard and scan it.
+WhatsApp QR generated.
+WhatsApp QR generated. Open the dashboard and scan it.
+WhatsApp QR generated.
+WhatsApp QR generated. Open the dashboard and scan it.
+WhatsApp connected.
+WhatsApp connected.
