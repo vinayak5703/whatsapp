@@ -1,20 +1,4 @@
 MongoDB configuration: {
   source: 'MONGO_URI',
-  uri: 'mongodb://127.0.0.1:27017/whatsapp_messaging_bot'
+  uri: 'mongodb+srv://vinayakbhoskar725_db_user:*****@cluster0.it8jsyy.mongodb.net/whatsapp_messaging_bot?retryWrites=true&w=majority'
 }
-Dashboard: http://127.0.0.1:5173
-MongoDB connected.
-WhatsApp QR generated.
-WhatsApp QR generated. Open the dashboard and scan it.
-WhatsApp QR generated.
-WhatsApp QR generated. Open the dashboard and scan it.
-WhatsApp QR generated.
-WhatsApp QR generated. Open the dashboard and scan it.
-WhatsApp QR generated.
-WhatsApp QR generated. Open the dashboard and scan it.
-WhatsApp QR generated.
-WhatsApp QR generated. Open the dashboard and scan it.
-WhatsApp QR generated.
-WhatsApp QR generated. Open the dashboard and scan it.
-WhatsApp connected.
-WhatsApp connected.
