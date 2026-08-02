@@ -31,23 +31,53 @@ const supabaseKeySource = process.env.SUPABASE_SECRET_KEY
   : process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
   ? 'NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY'
   : 'none';
-const isPublishableKey = Boolean(
-  rawSupabaseKey && /publishable|anon/i.test(rawSupabaseKey)
-);
+const isPublishableKey = Boolean(rawSupabaseKey && /publishable|anon/i.test(rawSupabaseKey));
 
 console.log('Supabase configuration:', {
   source: supabaseKeySource,
   url: supabaseUrl || null
 });
 
-if (!supabaseUrl || !rawSupabaseKey) {
-  console.log('Supabase is not configured. Set SUPABASE_URL and SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY in environment variables.');
-} else if (isPublishableKey) {
-  console.log('Supabase key is a client-side publishable/anon key. Server-side auth operations require SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY.');
-} else {
-  supabase = createClient(supabaseUrl, rawSupabaseKey);
-  databaseConnected = true;
-  console.log('Supabase client initialized.');
+async function initializeSupabase() {
+  if (!supabaseUrl || !rawSupabaseKey) {
+    console.log('Supabase is not configured. Set SUPABASE_URL and SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY in environment variables.');
+    return;
+  }
+
+  if (isPublishableKey) {
+    console.log('Supabase key is a client-side publishable/anon key. Server-side auth operations require SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY.');
+    return;
+  }
+
+  supabase = createClient(supabaseUrl, rawSupabaseKey, { auth: { persistSession: false } });
+
+  try {
+    const { data, error } = await supabase.auth.admin.listUsers({ perPage: 1 });
+    if (error) {
+      console.error('Supabase key validation failed:', error.message || error);
+      supabase = null;
+      return;
+    }
+    const hasUsers = Array.isArray(data)
+      ? data.length >= 0
+      : data && Array.isArray(data.users);
+    if (!hasUsers) {
+      console.error('Supabase key validation failed: unexpected auth response.', JSON.stringify(data));
+      supabase = null;
+      return;
+    }
+    databaseConnected = true;
+    console.log('Supabase client initialized and key validated.');
+  } catch (error) {
+    console.error('Supabase key validation failed:', error.message || error);
+    supabase = null;
+  }
+}
+
+await initializeSupabase();
+
+if (!databaseConnected) {
+  console.log('Supabase is not connected. Set SUPABASE_URL and SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY in environment variables.');
 }
 
 
@@ -312,21 +342,43 @@ app.post('/api/whatsapp/disconnect', async (_req, res) => {
 app.get('/api/whatsapp/groups', async (_req, res) => {
   if (!(await isConnected())) return res.status(409).json({ error: 'WhatsApp is not connected.' });
   try {
-    // Avoid getChats(): WhatsApp sometimes rejects its full metadata lookup for
-    // a single chat. Only the safe fields needed for sending are read here.
-    const groups = await client.pupPage.evaluate(() => {
-      const chats = window.require('WAWebCollections').Chat.getModelsArray();
-      return chats
-        .filter(chat => chat.groupMetadata)
-        .map(chat => ({
-          name: chat.formattedTitle || chat.name || chat.id?._serialized,
-          id: chat.id?._serialized,
-          active: true
-        }))
-        .filter(group => group.name && group.id);
-    });
+    let groups = [];
+    if (client && typeof client.getChats === 'function') {
+      try {
+        const chats = await client.getChats();
+        groups = (Array.isArray(chats) ? chats : [])
+          .filter(chat => chat?.isGroup || chat?.groupMetadata)
+          .map(chat => {
+            const id = typeof chat.id === 'string' ? chat.id : chat?.id?._serialized || '';
+            return {
+              name: chat?.formattedTitle || chat?.name || (chat?.contact && (chat.contact.name || chat.contact.pushname)) || id,
+              id,
+              active: true,
+            };
+          })
+          .filter(group => group.name && group.id);
+      } catch (getChatsError) {
+        console.error('client.getChats failed, falling back to page evaluation:', getChatsError.message || getChatsError);
+      }
+    }
+
+    if ((!groups.length || !Array.isArray(groups)) && client?.pupPage) {
+      groups = await client.pupPage.evaluate(() => {
+        const chats = window.require('WAWebCollections').Chat.getModelsArray();
+        return chats
+          .filter(chat => chat.groupMetadata)
+          .map(chat => ({
+            name: chat.formattedTitle || chat.name || chat.id?._serialized,
+            id: chat.id?._serialized,
+            active: true,
+          }))
+          .filter(group => group.name && group.id);
+      });
+    }
+
     res.json({ count: groups.length, groups });
   } catch (error) {
+    console.error('WhatsApp groups error:', error.message || error);
     res.status(500).json({ error: error.message || 'Could not read WhatsApp groups.' });
   }
 });
@@ -334,19 +386,44 @@ app.get('/api/whatsapp/groups', async (_req, res) => {
 app.get('/api/whatsapp/contacts', async (_req, res) => {
   if (!(await isConnected())) return res.status(409).json({ error: 'WhatsApp is not connected.' });
   try {
-    const contacts = await client.pupPage.evaluate(() => {
-      const list = window.require('WAWebCollections').Contact.getModelsArray();
-      return list
-        .filter(contact => !contact.isGroup && contact.id?._serialized?.endsWith('@c.us'))
-        .map(contact => ({
-          name: contact.formattedName || contact.pushname || contact.name || contact.id.user,
-          id: contact.id._serialized,
-          type: 'contact'
-        }))
-        .filter(contact => contact.name && contact.id);
-    });
+    let contacts = [];
+    if (client && typeof client.getContacts === 'function') {
+      try {
+        const list = await client.getContacts();
+        contacts = (Array.isArray(list) ? list : [])
+          .filter(contact => !contact?.isGroup && contact?.id)
+          .map(contact => {
+            const id = typeof contact.id === 'string' ? contact.id : contact?.id?._serialized || contact?.id?.user || '';
+            return {
+              name:
+                contact?.formattedName || contact?.pushname || contact?.name || contact?.shortName || contact?.verifiedName || id,
+              id,
+              type: 'contact',
+            };
+          })
+          .filter(contact => contact.name && contact.id && contact.id.endsWith('@c.us'));
+      } catch (getContactsError) {
+        console.error('client.getContacts failed, falling back to page evaluation:', getContactsError.message || getContactsError);
+      }
+    }
+
+    if ((!contacts.length || !Array.isArray(contacts)) && client?.pupPage) {
+      contacts = await client.pupPage.evaluate(() => {
+        const list = window.require('WAWebCollections').Contact.getModelsArray();
+        return list
+          .filter(contact => !contact.isGroup && contact.id?._serialized?.endsWith('@c.us'))
+          .map(contact => ({
+            name: contact.formattedName || contact.pushname || contact.name || contact.id.user,
+            id: contact.id._serialized,
+            type: 'contact',
+          }))
+          .filter(contact => contact.name && contact.id);
+      });
+    }
+
     res.json({ count: contacts.length, contacts });
   } catch (error) {
+    console.error('WhatsApp contacts error:', error.message || error);
     res.status(500).json({ error: error.message || 'Could not read WhatsApp contacts.' });
   }
 });
