@@ -19,8 +19,8 @@ let databaseConnected = false;
 let supabase = null;
 
 const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || process.env.SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-const supabaseSource = process.env.SUPABASE_SECRET_KEY
+const rawSupabaseKey = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || process.env.SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+const supabaseKeySource = process.env.SUPABASE_SECRET_KEY
   ? 'SUPABASE_SECRET_KEY'
   : process.env.SUPABASE_SERVICE_ROLE_KEY
   ? 'SUPABASE_SERVICE_ROLE_KEY'
@@ -31,17 +31,23 @@ const supabaseSource = process.env.SUPABASE_SECRET_KEY
   : process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
   ? 'NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY'
   : 'none';
+const isPublishableKey = Boolean(
+  rawSupabaseKey && /publishable|anon/i.test(rawSupabaseKey)
+);
+
 console.log('Supabase configuration:', {
-  source: supabaseSource,
+  source: supabaseKeySource,
   url: supabaseUrl || null
 });
 
-if (supabaseUrl && supabaseKey) {
-  supabase = createClient(supabaseUrl, supabaseKey);
+if (!supabaseUrl || !rawSupabaseKey) {
+  console.log('Supabase is not configured. Set SUPABASE_URL and SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY in environment variables.');
+} else if (isPublishableKey) {
+  console.log('Supabase key is a client-side publishable/anon key. Server-side auth operations require SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY.');
+} else {
+  supabase = createClient(supabaseUrl, rawSupabaseKey);
   databaseConnected = true;
   console.log('Supabase client initialized.');
-} else {
-  console.log('Supabase is not configured. Set SUPABASE_URL and SUPABASE_SECRET_KEY (or SUPABASE_SERVICE_ROLE_KEY / SUPABASE_KEY / NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY) in environment variables.');
 }
 
 
