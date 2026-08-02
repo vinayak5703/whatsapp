@@ -2,14 +2,12 @@ import express from 'express';
 import QRCode from 'qrcode';
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
 import multer from 'multer';
 import pkg from 'whatsapp-web.js';
 import dotenv from 'dotenv';
-import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import User from './models/User.js';
+import { createClient } from '@supabase/supabase-js';
 
 dotenv.config();
 
@@ -18,34 +16,36 @@ const app = express();
 const port = process.env.PORT || 5173;
 const jwtSecret = process.env.JWT_SECRET || 'change-this-development-jwt-secret';
 let databaseConnected = false;
+let supabase = null;
 
-function normalizeUri(value) {
-  if (!value || typeof value !== 'string') return value;
-  let trimmed = value.replace(/^\uFEFF/, '').trim();
-  trimmed = trimmed.replace(/^(?:export\s+)?(?:MONGO_URI|MONGODB_URI|MONGO_URL)\s*[:=]\s*/i, '').trim();
-  trimmed = trimmed.replace(/^[\"'\u2018\u2019\u201c\u201d]+|[\"'\u2018\u2019\u201c\u201d]+$/g, '').trim();
-  return trimmed.replace(/^[\s\uFEFF\u200B\u200C\u200D]+|[\s\uFEFF\u200B\u200C\u200D]+$/gu, '');
-}
-
-function maskMongoUri(uri) {
-  if (!uri || typeof uri !== 'string') return uri;
-  return uri.replace(/^(mongodb(?:\+srv)?:\/\/)([^:]+):([^@]+)@/, '$1$2:*****@');
-}
-
-const rawMongoUri = process.env.MONGO_URI || process.env.MONGODB_URI || process.env.MONGO_URL || (process.env.NODE_ENV === 'production' ? null : 'mongodb://127.0.0.1:27017/whatsapp_messaging_bot');
-const mongoUri = normalizeUri(rawMongoUri);
-console.log('MongoDB configuration:', {
-  source: process.env.MONGO_URI ? 'MONGO_URI' : process.env.MONGODB_URI ? 'MONGODB_URI' : process.env.MONGO_URL ? 'MONGO_URL' : 'default',
-  uri: maskMongoUri(mongoUri)
+const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || process.env.SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+const supabaseSource = process.env.SUPABASE_SECRET_KEY
+  ? 'SUPABASE_SECRET_KEY'
+  : process.env.SUPABASE_SERVICE_ROLE_KEY
+  ? 'SUPABASE_SERVICE_ROLE_KEY'
+  : process.env.SUPABASE_KEY
+  ? 'SUPABASE_KEY'
+  : process.env.SUPABASE_PUBLISHABLE_KEY
+  ? 'SUPABASE_PUBLISHABLE_KEY'
+  : process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+  ? 'NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY'
+  : 'none';
+console.log('Supabase configuration:', {
+  source: supabaseSource,
+  url: supabaseUrl || null
 });
 
-if (mongoUri) {
-  mongoose.connect(mongoUri)
-    .then(() => { databaseConnected = true; console.log('MongoDB connected.'); })
-    .catch(error => console.error('MongoDB connection error:', error.message));
+if (supabaseUrl && supabaseKey) {
+  supabase = createClient(supabaseUrl, supabaseKey);
+  databaseConnected = true;
+  console.log('Supabase client initialized.');
 } else {
-  console.log('MongoDB is not configured. Set MONGO_URI, MONGODB_URI, or MONGO_URL in environment variables.');
+  console.log('Supabase is not configured. Set SUPABASE_URL and SUPABASE_SECRET_KEY (or SUPABASE_SERVICE_ROLE_KEY / SUPABASE_KEY / NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY) in environment variables.');
 }
+
+
+
 
 // Keep the dashboard available if the WhatsApp Web session closes or expires.
 // The user can then reconnect from Settings without losing the web server.
@@ -99,7 +99,7 @@ function registerEvents() {
   });
 }
 
-function createClient() {
+function initializeWhatsappClient() {
   const puppeteerArgs = process.env.PUPPETEER_ARGS
     ? process.env.PUPPETEER_ARGS.split(' ')
     : ['--no-sandbox', '--disable-setuid-sandbox'];
@@ -123,7 +123,7 @@ function createClient() {
   });
 }
 
-createClient();
+initializeWhatsappClient();
 
 client.on('qr', async qr => {
   qrDataUrl = await QRCode.toDataURL(qr);
@@ -150,25 +150,68 @@ const upload = multer({ storage, limits: { fileSize: 25 * 1024 * 1024 } }); // 2
 app.get('/api/auth/status', (_req, res) => res.json({ databaseConnected }));
 
 app.post('/api/auth/register', async (req, res) => {
-  if (!databaseConnected) return res.status(503).json({ error: 'MongoDB is not connected. Set MONGO_URI, MONGODB_URI, or MONGO_URL in environment variables.' });
+  if (!databaseConnected) return res.status(503).json({ error: 'Supabase is not connected. Set SUPABASE_URL and SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY in environment variables.' });
   const { name, email, password } = req.body || {};
   if (!name || !email || !password || password.length < 6) return res.status(400).json({ error: 'Name, email, and a password of at least 6 characters are required.' });
+
+  const emailLower = String(email).toLowerCase();
   try {
-    const exists = await User.findOne({ email: email.toLowerCase() });
-    if (exists) return res.status(409).json({ error: 'An account with this email already exists.' });
-    const user = await User.create({ name, email, passwordHash: await bcrypt.hash(password, 12), role: 'Administrator' });
-    const token = jwt.sign({ id: user.id, role: user.role }, jwtSecret, { expiresIn: '8h' });
-    res.status(201).json({ token, user: { name: user.name, email: user.email, role: user.role } });
-  } catch (error) { res.status(500).json({ error: error.message }); }
+    const { data: user, error } = await supabase.auth.admin.createUser({
+      email: emailLower,
+      password,
+      user_metadata: { name, role: 'Administrator' },
+      email_confirm: true
+    });
+
+    if (error) {
+      if (error.message && error.message.toLowerCase().includes('duplicate')) {
+        return res.status(409).json({ error: 'An account with this email already exists.' });
+      }
+      throw error;
+    }
+
+    const token = jwt.sign({ id: user.id, role: user.user_metadata?.role || 'Administrator' }, jwtSecret, { expiresIn: '8h' });
+    res.status(201).json({
+      token,
+      user: {
+        name: user.user_metadata?.name || name,
+        email: user.email,
+        role: user.user_metadata?.role || 'Administrator'
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message || 'Could not create user.' });
+  }
 });
 
 app.post('/api/auth/login', async (req, res) => {
-  if (!databaseConnected) return res.status(503).json({ error: 'MongoDB is not connected. Set MONGO_URI, MONGODB_URI, or MONGO_URL in environment variables.' });
+  if (!databaseConnected) return res.status(503).json({ error: 'Supabase is not connected. Set SUPABASE_URL and SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY in environment variables.' });
   const { email, password } = req.body || {};
-  const user = await User.findOne({ email: String(email || '').toLowerCase() });
-  if (!user || !(await bcrypt.compare(password || '', user.passwordHash))) return res.status(401).json({ error: 'Incorrect email or password.' });
-  const token = jwt.sign({ id: user.id, role: user.role }, jwtSecret, { expiresIn: '8h' });
-  res.json({ token, user: { name: user.name, email: user.email, role: user.role } });
+  if (!email || !password) return res.status(400).json({ error: 'Email and password are required.' });
+
+  try {
+    const emailLower = String(email).toLowerCase();
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: emailLower,
+      password
+    });
+
+    if (error || !data?.user) return res.status(401).json({ error: 'Incorrect email or password.' });
+
+    const user = data.user;
+    const role = user.user_metadata?.role || 'Operator';
+    const token = jwt.sign({ id: user.id, role }, jwtSecret, { expiresIn: '8h' });
+    res.json({
+      token,
+      user: {
+        name: user.user_metadata?.name || '',
+        email: user.email,
+        role
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message || 'Could not authenticate user.' });
+  }
 });
 
 app.get('/api/whatsapp/status', async (_req, res) => {
@@ -242,7 +285,7 @@ app.post('/api/whatsapp/disconnect', async (_req, res) => {
       try { client = null; } catch {};
       state = 'starting';
 
-      setTimeout(() => { createClient(); }, 2000);
+      setTimeout(() => { initializeWhatsappClient(); }, 2000);
 
       return res.status(500).json({ success: false, error: 'Could not remove session folder. Ensure no other processes (including Chrome/Node) are using it and try again.' });
     }
@@ -250,7 +293,7 @@ app.post('/api/whatsapp/disconnect', async (_req, res) => {
     account = null;
     state = 'starting';
 
-    setTimeout(() => { createClient(); }, 2000);
+    setTimeout(() => { initializeWhatsappClient(); }, 2000);
 
     return res.json({ success: true, message: 'WhatsApp disconnected successfully. New QR will appear shortly.' });
 

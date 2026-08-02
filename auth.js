@@ -5,7 +5,7 @@ let registerMode = false;
 function setAuthMode(register) {
   registerMode = register;
   document.querySelector('#authTitle').textContent = register ? 'Create your account' : 'Sign in to your account';
-  document.querySelector('#authSub').textContent = register ? 'Your account will be securely saved in MongoDB.' : 'Manage every conversation from one dashboard.';
+  document.querySelector('#authSub').textContent = register ? 'Your account will be securely saved in Supabase.' : 'Manage every conversation from one dashboard.';
   document.querySelector('#nameField').classList.toggle('hidden', !register);
   document.querySelector('#authSubmit').textContent = register ? 'Create Account' : 'Sign In';
   document.querySelector('#authSwitch').innerHTML = register ? 'Already have an account? <button>Sign in</button>' : 'New here? <button>Create an account</button>';
