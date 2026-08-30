@@ -22,7 +22,7 @@ async function loadRecipientSelector() {
   if (!form) return;
   try {
     const [groupsResponse, contactsResponse] = await Promise.all([
-      fetch('/api/whatsapp/groups'), fetch('/api/whatsapp/contacts')
+      window.apiFetch('/api/whatsapp/groups'), window.apiFetch('/api/whatsapp/contacts')
     ]);
     if (!groupsResponse.ok || !contactsResponse.ok) throw new Error('Connect WhatsApp from Settings first.');
     const groups = (await groupsResponse.json()).groups;
@@ -91,9 +91,9 @@ async function loadRecipientSelector() {
           if (message) fd.append('message', message);
           fd.append('recipients', JSON.stringify(recipients));
           attachments.forEach(file => fd.append('attachments', file, file.name));
-          response = await fetch('/api/whatsapp/send', { method: 'POST', body: fd });
+          response = await window.apiFetch('/api/whatsapp/send', { method: 'POST', body: fd });
         } else {
-          response = await fetch('/api/whatsapp/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message, recipients }) });
+          response = await window.apiFetch('/api/whatsapp/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message, recipients }) });
         }
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || 'Message delivery failed.');
@@ -115,17 +115,12 @@ async function loadRecipientSelector() {
   }
 }
 
-document.addEventListener('click', event => {
-  if (!event.target.closest('[data-page="Send Message"]')) return;
-  setTimeout(loadRecipientSelector, 120);
-});
-
-window.addEventListener('hashchange', () => {
-  if (window.location.hash === '#send') setTimeout(loadRecipientSelector, 120);
+window.addEventListener('app:route', event => {
+  if (event.detail?.page === 'Send Message') setTimeout(loadRecipientSelector, 0);
 });
 
 document.addEventListener('DOMContentLoaded', () => {
-  if (window.location.hash === '#send') setTimeout(loadRecipientSelector, 120);
+  if (window.location.hash === '#send') setTimeout(loadRecipientSelector, 0);
 });
 
 updateDynamicDashboard();

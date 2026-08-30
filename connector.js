@@ -1,5 +1,5 @@
 async function fetchJsonSafe(url, options) {
-  const response = await fetch(url, options);
+  const response = await (window.apiFetch ? window.apiFetch(url, options) : fetch(url, options));
   const contentType = response.headers.get('content-type') || '';
   let body;
   if (contentType.includes('application/json')) {
@@ -33,13 +33,16 @@ document.addEventListener('click', async event => {
       const status = await fetchJsonSafe('/api/whatsapp/status');
       if (status.state === 'connected') {
         box.innerHTML = `<b style="color:#078c56">Connected</b> as ${status.account || 'your number'}`;
+      } else if (status.state === 'auth_failed') {
+        box.textContent = 'WhatsApp authentication failed. Disconnect and retry to generate a fresh QR code.';
       } else if (status.qr) {
         box.innerHTML = `<b>Scan this QR using WhatsApp → Linked devices</b><br><img src="${status.qr}" alt="WhatsApp QR code" style="width:230px;margin-top:12px">`;
       } else {
-        box.textContent = `Status: ${status.state}. Wait a few seconds, then try again.`;
+        const errorDetail = status.error ? ` (${status.error})` : '';
+        box.textContent = `Status: ${status.state}${errorDetail}. Wait a few seconds, then try again.`;
       }
-    } catch {
-      box.textContent = 'Server not running. Run npm install, then npm start.';
+    } catch (error) {
+      box.textContent = error.message || 'Server not running. Run npm install, then npm start.';
     }
     return;
   }
@@ -62,7 +65,7 @@ document.addEventListener('click', async event => {
 let refreshingGroups = false;
 async function syncWhatsAppGroups() {
   try {
-    const response = await fetch('/api/whatsapp/groups');
+    const response = await window.apiFetch('/api/whatsapp/groups');
     if (!response.ok) return false;
     const data = await response.json();
     const current = JSON.parse(localStorage.getItem('wa-bot-data') || '{}');

@@ -13,7 +13,7 @@ dotenv.config();
 
 const { Client, LocalAuth, MessageMedia } = pkg;
 const app = express();
-const port = process.env.PORT || 5173;
+const port = process.env.PORT || 3000;
 const jwtSecret = process.env.JWT_SECRET || 'change-this-development-jwt-secret';
 let databaseConnected = false;
 let supabase = null;
@@ -91,8 +91,44 @@ process.on('uncaughtException', error => console.error('WhatsApp session error:'
 let qrDataUrl = null;
 let state = 'starting';
 let account = null;
+let lastConnectionError = null;
+let currentWhatsappClientId = process.env.WEBJS_SESSION_ID || 'group-messaging-bot';
+
+function getWhatsappClientId() {
+  return currentWhatsappClientId;
+}
+
+function getSessionFolderName() {
+  return `session-${getWhatsappClientId()}`;
+}
+
+function getSessionPath() {
+  return path.join(process.cwd(), '.wwebjs_auth', getSessionFolderName());
+}
+
+async function cleanSessionFolder(sessionPath) {
+  const maxAttempts = 5;
+  const delayMs = 300;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      if (fs.existsSync(sessionPath)) {
+        fs.rmSync(sessionPath, { recursive: true, force: true });
+        console.log('Deleted WhatsApp session folder:', sessionPath);
+      }
+      return true;
+    } catch (error) {
+      console.error(`Failed to remove session folder (attempt ${attempt}/${maxAttempts}):`, error.code || error.message || error);
+      if (attempt < maxAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+  }
+  return false;
+}
+
 async function isConnected() {
   if (state === 'connected') return true;
+  if (!client || typeof client.getState !== 'function') return false;
   try {
     const clientState = await client.getState();
     if (clientState === 'CONNECTED') {
@@ -103,7 +139,226 @@ async function isConnected() {
   } catch { /* session is still loading or disconnected */ }
   return false;
 }
+
+function normalizeWhatsappCollection(raw) {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw.toArray === 'function') {
+    try {
+      const result = raw.toArray();
+      if (Array.isArray(result)) return result;
+    } catch {}
+  }
+  if (typeof raw[Symbol.iterator] === 'function') {
+    try {
+      return Array.from(raw);
+    } catch {}
+  }
+  if (raw && typeof raw === 'object') {
+    if (Array.isArray(raw.models)) return raw.models;
+    if (raw.models && typeof raw.models[Symbol.iterator] === 'function') {
+      try { return Array.from(raw.models); } catch {}
+    }
+    if (typeof raw.entries === 'function') {
+      try { return Array.from(raw.entries()).map(([_, value]) => value); } catch {}
+    }
+    return Object.values(raw);
+  }
+  return [];
+}
+
+function getWhatsappId(rawId) {
+  if (typeof rawId === 'string') return rawId;
+  if (!rawId) return '';
+  if (typeof rawId._serialized === 'string') return rawId._serialized;
+  if (typeof rawId.id === 'string') return rawId.id;
+  if (typeof rawId.user === 'string' && typeof rawId.server === 'string') return `${rawId.user}@${rawId.server}`;
+  return '';
+}
+
+function isWhatsappGroup(item) {
+  const id = getWhatsappId(item?.id || item?.wid || item);
+  const server = item?.id?.server || item?.wid?.server || '';
+  return Boolean(
+    item?.isGroup ||
+    item?.groupMetadata ||
+    server === 'g.us' ||
+    id.endsWith('@g.us')
+  );
+}
+
+function dedupeItems(items) {
+  const seen = new Map();
+  for (const item of Array.isArray(items) ? items : []) {
+    const id = typeof item?.id === 'string'
+      ? item.id
+      : item?.id?._serialized || item?.id?.user || item?.id || '';
+    if (!id) continue;
+    if (!seen.has(id)) seen.set(id, item);
+  }
+  return Array.from(seen.values());
+}
+
+async function getWhatsappChats() {
+  if (typeof client?.getChats === 'function') {
+    try {
+      const chats = normalizeWhatsappCollection(await client.getChats());
+      if (chats.length) return dedupeItems(chats);
+    } catch (error) {
+      console.error('getWhatsappChats client.getChats error:', error.message || error);
+    }
+  }
+
+  if (client?.pupPage) {
+    try {
+      await client.pupPage.waitForFunction('window.WWebJS != undefined', { timeout: 20000 });
+      const fallbackChats = await client.pupPage.evaluate(async () => {
+        const getArray = value => {
+          if (!value) return [];
+          if (Array.isArray(value)) return value;
+          if (typeof value.toArray === 'function') {
+            try { return value.toArray(); } catch { return []; }
+          }
+          if (typeof value[Symbol.iterator] === 'function') {
+            try { return Array.from(value); } catch { return []; }
+          }
+          if (value?.values && typeof value.values === 'function') {
+            try { return Array.from(value.values()); } catch { return []; }
+          }
+          return Object.values(value || {});
+        };
+
+        const rawChats = window.WWebJS && typeof window.WWebJS.getChats === 'function'
+          ? await window.WWebJS.getChats()
+          : null;
+        let chats = getArray(rawChats);
+        if (!chats.length && window.require) {
+          const collection = window.require('WAWebCollections')?.Chat?.getModelsArray?.();
+          chats = getArray(collection);
+        }
+
+        chats = Array.isArray(chats) ? chats : Object.values(chats || {});
+
+        return chats.map(chat => ({
+          id: chat?.id?._serialized || chat?.id || '',
+          name: chat?.formattedTitle || chat?.name || chat?.contact?.name || chat?.contact?.pushname || '',
+          isGroup: chat?.isGroup,
+          groupMetadata: chat?.groupMetadata,
+          contact: chat?.contact ? {
+            id: chat.contact?.id?._serialized || chat.contact?.id || '',
+            name: chat.contact?.name || chat.contact?.pushname || chat.contact?.formattedName || ''
+          } : undefined,
+          formattedTitle: chat?.formattedTitle,
+        }));
+      });
+      if (Array.isArray(fallbackChats)) return dedupeItems(fallbackChats);
+    } catch (error) {
+      console.error('getWhatsappChats fallback error:', error.message || error);
+    }
+  }
+
+  return [];
+}
+
+async function getWhatsappContacts() {
+  if (typeof client?.getContacts === 'function') {
+    try {
+      const contacts = normalizeWhatsappCollection(await client.getContacts());
+      if (contacts.length) return dedupeItems(contacts);
+    } catch (error) {
+      console.error('getWhatsappContacts client.getContacts error:', error.message || error);
+    }
+  }
+
+  if (client?.pupPage) {
+    try {
+      await client.pupPage.waitForFunction('window.WWebJS != undefined', { timeout: 20000 });
+      const fallbackContacts = await client.pupPage.evaluate(async () => {
+        const getArray = value => {
+          if (!value) return [];
+          if (Array.isArray(value)) return value;
+          if (typeof value.toArray === 'function') {
+            try { return value.toArray(); } catch { return []; }
+          }
+          if (typeof value[Symbol.iterator] === 'function') {
+            try { return Array.from(value); } catch { return []; }
+          }
+          if (value?.values && typeof value.values === 'function') {
+            try { return Array.from(value.values()); } catch { return []; }
+          }
+          return Object.values(value || {});
+        };
+
+        const rawContacts = window.WWebJS && typeof window.WWebJS.getContacts === 'function'
+          ? await window.WWebJS.getContacts()
+          : null;
+        let contacts = getArray(rawContacts);
+        if (!contacts.length && window.require) {
+          const collection = window.require('WAWebCollections')?.Contact?.getModelsArray?.();
+          contacts = getArray(collection);
+        }
+
+        contacts = Array.isArray(contacts) ? contacts : Object.values(contacts || {});
+
+        return contacts.map(contact => ({
+          id: contact?.id?._serialized || contact?.id || '',
+          formattedName: contact?.formattedName,
+          pushname: contact?.pushname,
+          name: contact?.name,
+          shortName: contact?.shortName,
+          verifiedName: contact?.verifiedName,
+          isGroup: contact?.isGroup,
+        }));
+      });
+      if (Array.isArray(fallbackContacts)) return dedupeItems(fallbackContacts);
+    } catch (error) {
+      console.error('getWhatsappContacts fallback error:', error.message || error);
+    }
+  }
+
+  return [];
+}
+
+async function getWhatsappGroups() {
+  const chats = await getWhatsappChats();
+  const groupsFromChats = chats.filter(isWhatsappGroup);
+  if (groupsFromChats.length) return groupsFromChats;
+
+  // Some WhatsApp Web builds expose group entries through the contact store
+  // before they appear in the chat collection. Use that store as a fallback.
+  const contacts = await getWhatsappContacts();
+  return contacts.filter(isWhatsappGroup);
+}
+
+
 let client;
+
+async function safeDestroyWhatsappClient() {
+  if (!client) return;
+  try {
+    await client.destroy();
+  } catch (error) {
+    console.error('Error destroying WhatsApp client:', error.message || error);
+  }
+
+  try {
+    if (client.pupBrowser && typeof client.pupBrowser.close === 'function') {
+      await client.pupBrowser.close();
+      console.log('Closed Puppeteer browser during cleanup.');
+    }
+  } catch (error) {
+    console.error('Error closing Puppeteer browser during cleanup:', error.message || error);
+  }
+
+  try {
+    client.removeAllListeners && client.removeAllListeners();
+  } catch (error) {
+    console.error('Error removing client listeners:', error.message || error);
+  }
+
+  client = null;
+  state = 'starting';
+}
 
 function registerEvents() {
   client.on('qr', async qr => {
@@ -125,7 +380,12 @@ function registerEvents() {
 
   client.on('auth_failure', message => {
     state = 'auth_failed';
-    console.error(message);
+    qrDataUrl = null;
+    console.error('WhatsApp authentication failure:', message);
+    setTimeout(() => {
+      console.log('Reinitializing WhatsApp client after auth failure.');
+      initializeWhatsappClient().catch(error => console.error('Failed to reinitialize after auth failure:', error.message || error));
+    }, 1500);
   });
 
   client.on('disconnected', reason => {
@@ -135,14 +395,26 @@ function registerEvents() {
   });
 }
 
-function initializeWhatsappClient() {
+async function initializeWhatsappClient(retryAllowed = true) {
+  if (client) {
+    await safeDestroyWhatsappClient();
+  }
+
+  const sessionPath = getSessionPath();
   const puppeteerArgs = process.env.PUPPETEER_ARGS
     ? process.env.PUPPETEER_ARGS.split(' ')
     : ['--no-sandbox', '--disable-setuid-sandbox'];
 
+  state = 'starting';
+  qrDataUrl = null;
+  lastConnectionError = null;
+
+  const clientId = getWhatsappClientId();
+  console.log('Starting WhatsApp client with session id:', clientId, 'session path:', sessionPath);
+
   client = new Client({
     authStrategy: new LocalAuth({
-      clientId: 'group-messaging-bot'
+      clientId
     }),
     puppeteer: {
       headless: true,
@@ -153,18 +425,42 @@ function initializeWhatsappClient() {
 
   registerEvents();
 
-  client.initialize().catch(error => {
+  client.initialize().catch(async error => {
+    const message = error instanceof Error ? error.message : String(error);
+    lastConnectionError = message;
     state = 'connection_error';
-    console.error('WhatsApp startup failed:', error);
+    console.error('WhatsApp startup failed:', message);
+
+    const lockedError = /already running|in use|userDataDir|userdatadir|EPERM|Permission denied/i.test(message);
+    if (retryAllowed && lockedError) {
+      try {
+        console.log('WhatsApp session path looks locked or already in use. Cleaning old session and retrying with a fresh session id.');
+        await safeDestroyWhatsappClient();
+        const cleaned = await cleanSessionFolder(sessionPath);
+        if (!cleaned) {
+          console.warn('Could not remove locked session folder; using a fresh session folder instead.');
+        }
+        currentWhatsappClientId = `${process.env.WEBJS_SESSION_ID || 'group-messaging-bot'}-${Date.now()}`;
+        console.log('Retrying with new WhatsApp session id:', currentWhatsappClientId);
+        await initializeWhatsappClient(false);
+      } catch (retryError) {
+        console.error('Retrying WhatsApp initialization failed:', retryError instanceof Error ? retryError.message : retryError);
+      }
+    }
   });
 }
 
 initializeWhatsappClient();
 
-client.on('qr', async qr => {
-  qrDataUrl = await QRCode.toDataURL(qr);
-  state = 'awaiting_qr_scan';
-  console.log('WhatsApp QR generated. Open the dashboard and scan it.');
+// Enable basic CORS for local dashboard and file:// clients
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+  next();
 });
 
 // JSON body parsing for API endpoints
@@ -251,8 +547,13 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 app.get('/api/whatsapp/status', async (_req, res) => {
+  // Keep startup failures visible. Retrying on every dashboard poll clears the
+  // error and leaves the UI stuck at "starting" with no QR code.
+  if (!client || ['disconnected', 'auth_failed'].includes(state)) {
+    await initializeWhatsappClient();
+  }
   await isConnected();
-  res.json({ state, account, qr: qrDataUrl });
+  res.json({ state, account, qr: qrDataUrl, error: lastConnectionError });
 });
 
 app.post('/api/whatsapp/disconnect', async (_req, res) => {
@@ -289,28 +590,9 @@ app.post('/api/whatsapp/disconnect', async (_req, res) => {
   try {
     state = 'disconnecting';
     qrDataUrl = null;
+    await safeDestroyWhatsappClient();
 
-    // Capture current puppeteer browser reference (if any) so it can be closed
-    const pupBrowserRef = client && client.pupBrowser ? client.pupBrowser : null;
-
-    try {
-      await client.destroy();
-    } catch (destroyErr) {
-      // Log and continue — attempt best-effort cleanup
-      console.error('Error during client.destroy():', destroyErr.message || destroyErr);
-    }
-
-    // Try to explicitly close Puppeteer browser if still available
-    if (pupBrowserRef && typeof pupBrowserRef.close === 'function') {
-      try {
-        await pupBrowserRef.close();
-        console.log('Explicitly closed Puppeteer browser reference captured before destroy.');
-      } catch (err) {
-        console.error('Error closing captured Puppeteer browser:', err.message || err);
-      }
-    }
-
-    const sessionPath = path.join(process.cwd(), '.wwebjs_auth', 'session-group-messaging-bot');
+    const sessionPath = getSessionPath();
 
     const removed = await safeRemoveSession(sessionPath);
     if (!removed) {
@@ -342,39 +624,17 @@ app.post('/api/whatsapp/disconnect', async (_req, res) => {
 app.get('/api/whatsapp/groups', async (_req, res) => {
   if (!(await isConnected())) return res.status(409).json({ error: 'WhatsApp is not connected.' });
   try {
-    let groups = [];
-    if (client && typeof client.getChats === 'function') {
-      try {
-        const chats = await client.getChats();
-        groups = (Array.isArray(chats) ? chats : [])
-          .filter(chat => chat?.isGroup || chat?.groupMetadata)
-          .map(chat => {
-            const id = typeof chat.id === 'string' ? chat.id : chat?.id?._serialized || '';
-            return {
-              name: chat?.formattedTitle || chat?.name || (chat?.contact && (chat.contact.name || chat.contact.pushname)) || id,
-              id,
-              active: true,
-            };
-          })
-          .filter(group => group.name && group.id);
-      } catch (getChatsError) {
-        console.error('client.getChats failed, falling back to page evaluation:', getChatsError.message || getChatsError);
-      }
-    }
-
-    if ((!groups.length || !Array.isArray(groups)) && client?.pupPage) {
-      groups = await client.pupPage.evaluate(() => {
-        const chats = window.require('WAWebCollections').Chat.getModelsArray();
-        return chats
-          .filter(chat => chat.groupMetadata)
-          .map(chat => ({
-            name: chat.formattedTitle || chat.name || chat.id?._serialized,
-            id: chat.id?._serialized,
-            active: true,
-          }))
-          .filter(group => group.name && group.id);
-      });
-    }
+    const groupItems = await getWhatsappGroups();
+    const groups = dedupeItems(groupItems
+      .map(group => {
+        const id = getWhatsappId(group.id) || getWhatsappId(group.wid);
+        return {
+          name: group?.formattedTitle || group?.name || group?.subject || group?.pushname || (group?.contact && (group.contact.name || group.contact.pushname)) || id,
+          id,
+          active: true,
+        };
+      }))
+      .filter(group => group.name && group.id);
 
     res.json({ count: groups.length, groups });
   } catch (error) {
@@ -386,40 +646,19 @@ app.get('/api/whatsapp/groups', async (_req, res) => {
 app.get('/api/whatsapp/contacts', async (_req, res) => {
   if (!(await isConnected())) return res.status(409).json({ error: 'WhatsApp is not connected.' });
   try {
-    let contacts = [];
-    if (client && typeof client.getContacts === 'function') {
-      try {
-        const list = await client.getContacts();
-        contacts = (Array.isArray(list) ? list : [])
-          .filter(contact => !contact?.isGroup && contact?.id)
-          .map(contact => {
-            const id = typeof contact.id === 'string' ? contact.id : contact?.id?._serialized || contact?.id?.user || '';
-            return {
-              name:
-                contact?.formattedName || contact?.pushname || contact?.name || contact?.shortName || contact?.verifiedName || id,
-              id,
-              type: 'contact',
-            };
-          })
-          .filter(contact => contact.name && contact.id && contact.id.endsWith('@c.us'));
-      } catch (getContactsError) {
-        console.error('client.getContacts failed, falling back to page evaluation:', getContactsError.message || getContactsError);
-      }
-    }
-
-    if ((!contacts.length || !Array.isArray(contacts)) && client?.pupPage) {
-      contacts = await client.pupPage.evaluate(() => {
-        const list = window.require('WAWebCollections').Contact.getModelsArray();
-        return list
-          .filter(contact => !contact.isGroup && contact.id?._serialized?.endsWith('@c.us'))
-          .map(contact => ({
-            name: contact.formattedName || contact.pushname || contact.name || contact.id.user,
-            id: contact.id._serialized,
-            type: 'contact',
-          }))
-          .filter(contact => contact.name && contact.id);
-      });
-    }
+    const contactsData = await getWhatsappContacts();
+    const contacts = dedupeItems((Array.isArray(contactsData) ? contactsData : [])
+      .filter(contact => !contact?.isGroup && contact?.id)
+      .map(contact => {
+        const id = getWhatsappId(contact.id) || (typeof contact.id === 'string' ? contact.id : contact?.id?.user || '');
+        return {
+          name:
+            contact?.formattedName || contact?.pushname || contact?.name || contact?.shortName || contact?.verifiedName || id,
+          id,
+          type: 'contact',
+        };
+      }))
+      .filter(contact => contact.name && contact.id && contact.id.endsWith('@c.us'));
 
     res.json({ count: contacts.length, contacts });
   } catch (error) {
@@ -457,8 +696,15 @@ app.post('/api/whatsapp/send', upload.array('attachments'), async (req, res) => 
   const results = [];
   let chats = [];
   if (targets.some(group => !String(group.id || '').trim().match(/@(g|c)\.us$/))) {
-    try { chats = await client.getChats(); }
-    catch { return res.status(400).json({ error: 'Refresh Groups first so the app can save each group’s WhatsApp ID.' }); }
+    try {
+      chats = await getWhatsappChats();
+      if (!Array.isArray(chats) || chats.length === 0) {
+        throw new Error('No chats loaded yet.');
+      }
+    } catch (error) {
+      console.error('Could not load chats for sending message:', error.message || error);
+      return res.status(400).json({ error: 'Refresh Groups first so the app can save each group’s WhatsApp ID.' });
+    }
   }
 
   // Helper to cleanup uploaded temp files
@@ -513,5 +759,18 @@ app.post('/api/whatsapp/send', upload.array('attachments'), async (req, res) => 
 });
 
 
-app.listen(port, () => console.log(`Dashboard: http://127.0.0.1:${port}`));
+const portNumber = Number.isInteger(Number(process.env.PORT)) && Number(process.env.PORT) > 0 ? Number(process.env.PORT) : 3000;
+let currentPort = portNumber;
+const server = app.listen(currentPort, () => console.log(`Dashboard: http://127.0.0.1:${currentPort}`));
+server.on('error', (error) => {
+  if (error && error.code === 'EADDRINUSE') {
+    const fallbackPort = currentPort + 1;
+    console.warn(`Port ${currentPort} is in use. Trying port ${fallbackPort} instead.`);
+    currentPort = fallbackPort;
+    app.listen(currentPort, () => console.log(`Dashboard: http://127.0.0.1:${currentPort}`));
+  } else {
+    console.error('Failed to start server:', error);
+    process.exit(1);
+  }
+});
 

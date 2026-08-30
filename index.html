@@ -15,6 +15,61 @@
       /* Premium midnight palette */
       body{background:#f5f6ff!important;color:#18203a}.sidebar{background:linear-gradient(165deg,#170a3d,#081d48 58%,#0b3157)!important}.brand-mark{border-color:#62f2e4!important;color:#62f2e4!important;box-shadow:0 0 25px #62f2e455}.nav-item.active,.nav-item:hover{background:linear-gradient(100deg,#6935e5,#167de0)!important;box-shadow:0 8px 20px #080e3638}.plan-card{border-color:#5461bd!important;background:#ffffff0a}.plan-card button,.primary,.secondary{background:linear-gradient(100deg,#7646e8,#1f93e7)!important;box-shadow:0 7px 16px #4434b238}.topbar{background:#ffffffd9!important;backdrop-filter:blur(12px)}.breadcrumb span,.card-heading a,.text-btn{color:#6840d7!important}.stat-card{box-shadow:0 8px 22px #252a4d10}.green{background:linear-gradient(135deg,#e8faff,#e8f0ff)!important;border-color:#bddeed!important;color:#1682bf!important}.green em{background:linear-gradient(135deg,#31cbd7,#4c7fff)!important;color:#fff!important}.blue{background:linear-gradient(135deg,#f0edff,#e8f8ff)!important;border-color:#d6cff7!important;color:#7047e9!important}.blue em{background:linear-gradient(135deg,#8b55ed,#3b8ef4)!important}.amber{background:linear-gradient(135deg,#fff2e8,#fff7d6)!important;border-color:#f6ddbc!important;color:#e47738!important}.amber em{background:linear-gradient(135deg,#ff8a5d,#f9bd37)!important}.red{background:linear-gradient(135deg,#ffecf2,#fff0f1)!important;border-color:#f5cad8!important;color:#e64372!important}.red em{background:linear-gradient(135deg,#f44a87,#ff755d)!important}.tag{background:#e9e7ff!important;color:#5d3fc7!important}.login-art{background:radial-gradient(circle at 18% 20%,#854ced,#1c0d52 58%,#071c45)!important}.login-logo{border-color:#75f9e8!important;color:#75f9e8!important;box-shadow:0 0 28px #67f5e870}.eyebrow{color:#7045df!important}.login-form input:focus{box-shadow:0 0 0 4px #7045df18}.login-submit{background:linear-gradient(100deg,#7548e8,#168fe2)!important}.logout-btn:hover{border-color:#7045df!important;color:#5e38c8!important}
     </style>
+    <script>
+      (function () {
+        const localHosts = ['127.0.0.1', 'localhost'];
+        const defaultPorts = [3000, 3001, 3002, 5173];
+        let resolvedBase = null;
+
+        function getCandidateBases() {
+          const origin = window.location.origin;
+          const bases = [];
+          if (origin && origin !== 'null') {
+            bases.push(origin);
+          }
+          for (const host of localHosts) {
+            for (const port of defaultPorts) {
+              bases.push(`http://${host}:${port}`);
+            }
+          }
+          return [...new Set(bases)];
+        }
+
+        async function canReachApi(base) {
+          try {
+            const response = await fetch(`${base}/api/whatsapp/status`, {
+              method: 'GET',
+              mode: 'cors',
+              cache: 'no-store',
+            });
+            return response.ok;
+          } catch {
+            return false;
+          }
+        }
+
+        window.getApiBaseUrl = async function () {
+          if (resolvedBase) return resolvedBase;
+          const candidates = getCandidateBases();
+          for (const candidate of candidates) {
+            if (await canReachApi(candidate)) {
+              resolvedBase = candidate;
+              return resolvedBase;
+            }
+          }
+          resolvedBase = window.location.origin && window.location.origin !== 'null'
+            ? window.location.origin
+            : 'http://127.0.0.1:3000';
+          return resolvedBase;
+        };
+
+        window.apiFetch = async function (path, options) {
+          const base = await window.getApiBaseUrl();
+          const url = new URL(path, base).toString();
+          return fetch(url, { ...options, mode: 'cors' });
+        };
+      })();
+    </script>
   </head>
   <body>
     <section class="login-screen" id="loginScreen">
@@ -35,7 +90,7 @@
           <a class="nav-item" href="#users" data-page="User Management"><span>♙</span>Users</a>
           <a class="nav-item" href="#settings" data-page="Settings"><span>⚙</span>Settings</a>
         </nav>
-        <div class="plan-card"><strong>♛ &nbsp; Plan</strong><span>Valid till : 31 Dec 2026</span><button>Upgrade Plan</button></div>
+      
       </aside>
       <main class="main">
         <header class="topbar"><button class="icon-btn menu" id="menuBtn">☰</button><h1 id="pageTitle">Dashboard</h1><div class="top-actions"><button class="bell">♧<i>3</i></button><div class="avatar">AU</div><div class="profile"><b>Admin User</b><span>Administrator</span></div><button class="logout-btn" id="logoutBtn">Logout</button></div></header>
@@ -77,11 +132,11 @@
         window.__ensureAttachments = insertIfMissing;
       })();
     </script>
-    <script src="app.js?v=20260728T140900"></script>
+    <script src="app.js?v=20260830T160000"></script>
     <script src="connector.js?v=20260728T140900"></script>
-    <script src="recipient-selector.js?v=20260728T140900"></script>
-    <script src="directory.js?v=20260728T140900"></script>
-    <script src="live-ui.js?v=20260728T140900"></script>
+    <script src="recipient-selector.js?v=20260830T153000"></script>
+    <script src="directory.js?v=20260830T153000"></script>
+    <script src="live-ui.js?v=20260830T153000"></script>
     <script src="auth.js?v=20260728T140900"></script>
   </body>
 </html>

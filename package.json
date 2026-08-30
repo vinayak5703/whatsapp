@@ -7,6 +7,9 @@
     "start": "node server.js",
     "test:supabase": "node test-supabase.js"
   },
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "dependencies": {
     "bcryptjs": "^2.4.3",
     "dotenv": "^16.4.7",

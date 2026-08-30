@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
+import { inspect } from 'node:util';
 
 dotenv.config();
 
@@ -35,15 +36,31 @@ if (isPublishableKey) {
 
 const supabase = createClient(supabaseUrl, rawSupabaseKey);
 
+function logConnectionError(label, error) {
+  console.error(label, error instanceof Error ? error.message : error);
+  console.error('Error details:', inspect(error, { depth: 4, showHidden: true }));
+  if (error instanceof Error && error.cause) {
+    const cause = error.cause;
+    console.error('Underlying network error:', {
+      name: cause.name,
+      code: cause.code,
+      message: cause.message,
+      hostname: cause.hostname,
+      address: cause.address,
+      port: cause.port
+    });
+  }
+}
+
 (async () => {
   try {
     const { data, error } = await supabase.auth.admin.listUsers({ perPage: 1 });
     if (error) {
-      console.error('Supabase admin listUsers failed:', error.message || error);
+      logConnectionError('Supabase admin listUsers failed:', error);
       return;
     }
     console.log('Supabase admin listUsers succeeded. User count on first page:', data?.length ?? 0);
   } catch (error) {
-    console.error('Supabase connection test error:', error instanceof Error ? error.message : error);
+    logConnectionError('Supabase connection test error:', error);
   }
 })();

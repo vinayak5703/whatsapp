@@ -1,6 +1,6 @@
 async function refreshLiveDashboard() {
   try {
-    const [groupsResponse, contactsResponse] = await Promise.all([fetch('/api/whatsapp/groups'), fetch('/api/whatsapp/contacts')]);
+    const [groupsResponse, contactsResponse] = await Promise.all([window.apiFetch('/api/whatsapp/groups'), window.apiFetch('/api/whatsapp/contacts')]);
     if (!groupsResponse.ok || !contactsResponse.ok) return;
     const groups = await groupsResponse.json();
     const contacts = await contactsResponse.json();
@@ -28,9 +28,8 @@ function showScheduledModule() {
   });
 }
 
-document.addEventListener('click', event => {
-  const scheduled = event.target.closest('[data-page="Scheduled Messages"]');
-  if (scheduled) setTimeout(showScheduledModule, 0);
+window.addEventListener('app:route', event => {
+  if (event.detail?.page === 'Scheduled Messages') showScheduledModule();
 });
 
 document.querySelectorAll('.stat-card').forEach((card, index) => {

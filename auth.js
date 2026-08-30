@@ -19,7 +19,7 @@ authForm.onsubmit = async event => {
   const values = Object.fromEntries(new FormData(authForm));
   submit.disabled = true; submit.textContent = 'Please wait...'; error.textContent = '';
   try {
-    const response = await fetch(registerMode ? '/api/auth/register' : '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(values) });
+    const response = await window.apiFetch(registerMode ? '/api/auth/register' : '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(values) });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Authentication failed.');
     localStorage.setItem('wa-auth-token', data.token); localStorage.setItem('wa-auth-user', JSON.stringify(data.user));

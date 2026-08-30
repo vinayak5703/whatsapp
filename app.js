@@ -1,5 +1,9 @@
 const D={groups:[{name:'Sales Team',id:'1203630•••1101',active:true},{name:'Marketing Team',id:'1203630•••2234',active:true},{name:'HR Team',id:'1203630•••8892',active:true}],people:[],templates:[{name:'Good Morning',text:'Good morning everyone! Have a productive day.'}],users:[{name:'Admin User',email:'admin@example.com',role:'Administrator'}],logs:[],schedules:[{id:1,message:'Good Morning Everyone!',groups:'15 Groups',time:'27 May 2026 09:00 AM'}]};
-let db=JSON.parse(localStorage.getItem('wa-bot-data')||'null')||D;const $=s=>document.querySelector(s), other=$('#otherPage'), dash=$('#dashboard');
+let savedData={};
+try { savedData=JSON.parse(localStorage.getItem('wa-bot-data')||'{}')||{}; } catch { localStorage.removeItem('wa-bot-data'); }
+let db={...D,...savedData};
+for(const key of ['groups','people','templates','users','logs','schedules']) if(!Array.isArray(db[key])) db[key]=D[key];
+const $=s=>document.querySelector(s), other=$('#otherPage'), dash=$('#dashboard');
 const save=()=>localStorage.setItem('wa-bot-data',JSON.stringify(db));const e=s=>String(s).replace(/[&<>"']/g,x=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[x]));
 function toast(t){const n=$('#toast');n.textContent=t;n.classList.add('show');setTimeout(()=>n.classList.remove('show'),2500)}
 function now(){return new Date().toLocaleString('en-GB',{dateStyle:'medium',timeStyle:'short'})}
@@ -32,7 +36,7 @@ function setupAttachmentHandlers(inputSelector, previewSelector) {
 function table(headers,body){return `<div class="card" style="overflow:auto"><table><thead><tr>${headers.map(x=>`<th>${x}</th>`).join('')}</tr></thead><tbody>${body||`<tr><td colspan="${headers.length}" style="text-align:center;padding:36px">No records yet.</td></tr>`}</tbody></table></div>`}
 function options(){return `<option value="all">All active groups (${db.groups.filter(g=>g.active).length})</option>${db.groups.filter(g=>g.active).map(g=>`<option value="${e(g.name)}">${e(g.name)}</option>`).join('')}${db.people.map(p=>`<option value="${e(p.number)}">${e(p.name)} — ${e(p.number)}</option>`).join('')}`}
 function renderDashboard(){const s=$('.group-select select');s.innerHTML='<option value="">Select target</option>'+options();$('#activityList').innerHTML=(db.logs.slice(0,5).length?db.logs.slice(0,5):[{status:'success',title:'Bot ready',message:'Add your number or a group to begin.',time:'Now'}]).map(x=>`<div class="activity-item"><span class="status-dot ${x.status==='failed'?'failed':''}">${x.status==='failed'?'×':'✓'}</span><div><b>${e(x.title)}</b><p>${e(x.message)}</p></div><time>${e(x.time)}</time><span class="tag ${x.status==='failed'?'failed':''}">${x.status==='failed'?'Failed':'Success'}</span></div>`).join('');$('#scheduleRows').innerHTML=db.schedules.map(x=>`<tr><td>${x.id}</td><td>${e(x.message)}</td><td>${e(x.groups)}</td><td>${e(x.time)}</td><td><span class="tag">Scheduled</span></td><td><button class="danger-btn" data-dels="${x.id}">Delete</button></td></tr>`).join('')||'<tr><td colspan="6">No scheduled messages.</td></tr>';document.querySelectorAll('[data-dels]').forEach(b=>b.onclick=()=>{db.schedules=db.schedules.filter(x=>x.id!=b.dataset.dels);save();renderDashboard()})}
-async function queue(message,target){if(!message.trim())return toast('Please enter a message.');const groups=target==='all'?db.groups.filter(g=>g.active):db.groups.filter(g=>g.name===target);if(!groups.length)return toast('Select a WhatsApp group.');toast('Sending message...');try{const r=await fetch('/api/whatsapp/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message,groups})}),data=await r.json();if(!r.ok)throw new Error(data.error||'Could not send message.');data.results.forEach(x=>db.logs.unshift({status:x.status,title:`${x.status==='success'?'Message sent':'Failed'}: ${x.name}`,message:x.error||message.slice(0,100),time:formatTs(x.sentAt||x.attemptedAt)}));save();renderDashboard();toast(`Sent to ${data.results.filter(x=>x.status==='success').length} of ${data.results.length} groups.`)}catch(err){toast(err.message||'Start the Node server and connect WhatsApp first.')}}
+async function queue(message,target){if(!message.trim())return toast('Please enter a message.');const groups=target==='all'?db.groups.filter(g=>g.active):db.groups.filter(g=>g.name===target);if(!groups.length)return toast('Select a WhatsApp group.');toast('Sending message...');try{const r=await window.apiFetch('/api/whatsapp/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message,groups})}),data=await r.json();if(!r.ok)throw new Error(data.error||'Could not send message.');data.results.forEach(x=>db.logs.unshift({status:x.status,title:`${x.status==='success'?'Message sent':'Failed'}: ${x.name}`,message:x.error||message.slice(0,100),time:formatTs(x.sentAt||x.attemptedAt)}));save();renderDashboard();toast(`Sent to ${data.results.filter(x=>x.status==='success').length} of ${data.results.length} groups.`)}catch(err){toast(err.message||'Start the Node server and connect WhatsApp first.')}}
 function layout(title,sub,body){return `<div style="padding:24px;max-width:1180px;margin:auto"><div class="card-heading card" style="margin-bottom:20px"><div><h2 style="font-size:23px">${title}</h2><p style="margin:5px 0 0;color:#71808e">${sub}</p></div></div>${body}</div>`}
 function form(title,fields,id,button='Save'){return `<form class="card compose" id="${id}" style="margin-bottom:20px"><h2>${title}</h2>${fields}<button class="primary" style="margin-top:12px">${button}</button></form>`}
 function groups(){return layout('Groups & Recipients','Add WhatsApp group references and your own number for test delivery.',`<div class="dashboard-grid">${form('Add group','<label>Group name</label><input name="name" required placeholder="e.g. Product Team"/><label>WhatsApp group ID / reference</label><input name="id" required placeholder="e.g. 1203630...@g.us"/>','addGroup','Add Group')}${table(['Group','Reference','Status','Actions'],db.groups.map((x,i)=>`<tr><td><b>${e(x.name)}</b></td><td>${e(x.id)}</td><td>${x.active?'Active':'Inactive'}</td><td><button class="text-btn" data-toggle="${i}">${x.active?'Deactivate':'Activate'}</button> <button class="danger-btn" data-delg="${i}">Delete</button></td></tr>`).join(''))}</div><div class="dashboard-grid">${form('Add my WhatsApp number','<label>Your name</label><input name="name" required placeholder="Your name"/><label>WhatsApp number</label><input name="number" required placeholder="+91 98765 43210"/>','addPerson','Add Test Recipient')}${table(['Recipient','Number','Action'],db.people.map((x,i)=>`<tr><td><b>${e(x.name)}</b></td><td>${e(x.number)}</td><td><button class="danger-btn" data-delp="${i}">Remove</button></td></tr>`).join(''))}</div>`)}
@@ -66,7 +70,7 @@ function wire(page){if(page==='Groups'){$('#addGroup').onsubmit=x=>{x.preventDef
   // ensure preview updates even if the form variable is not found due to timing
   document.addEventListener('change', (e) => { if (e.target && e.target.id === 'attachments') renderPreview(); });
   if (form) {
-    const inp = document.querySelector('#attachments'); if (inp) inp.onchange = renderPreview; form.onsubmit = async x => { x.preventDefault(); const f = new FormData(form); const message = (f.get('message')||'').toString().trim(); const target = (f.get('target')||'').toString(); const groupsArr = target === 'all' ? db.groups.filter(g=>g.active) : db.groups.filter(g=>g.name===target); if ((!message || message.length===0) && (document.querySelector('#attachments')?.files.length===0)) return toast('Message or at least one attachment is required.'); if (!groupsArr.length) return toast('Select a WhatsApp group.'); const fd = new FormData(); if (message) fd.append('message', message); fd.append('groups', JSON.stringify(groupsArr)); for (const file of Array.from((document.querySelector('#attachments')?.files)||[])) { fd.append('attachments', file, file.name); } try { toast('Sending message...'); const r = await fetch('/api/whatsapp/send', { method: 'POST', body: fd }); const data = await r.json(); if (!r.ok) throw new Error(data.error || 'Could not send message.'); data.results.forEach(x=>db.logs.unshift({status:x.status,title:`${x.status==='success'?'Message sent':'Failed'}: ${x.name}`,message:x.error||message.slice(0,100),time:formatTs(x.sentAt||x.attemptedAt)})); save(); renderDashboard(); toast(`Sent to ${data.results.filter(x=>x.status==='success').length} of ${data.results.length} groups.`); form.reset(); renderPreview(); } catch(err){ toast(err.message||'Start the Node server and connect WhatsApp first.') } };
+    const inp = document.querySelector('#attachments'); if (inp) inp.onchange = renderPreview; form.onsubmit = async x => { x.preventDefault(); const f = new FormData(form); const message = (f.get('message')||'').toString().trim(); const target = (f.get('target')||'').toString(); const groupsArr = target === 'all' ? db.groups.filter(g=>g.active) : db.groups.filter(g=>g.name===target); if ((!message || message.length===0) && (document.querySelector('#attachments')?.files.length===0)) return toast('Message or at least one attachment is required.'); if (!groupsArr.length) return toast('Select a WhatsApp group.'); const fd = new FormData(); if (message) fd.append('message', message); fd.append('groups', JSON.stringify(groupsArr)); for (const file of Array.from((document.querySelector('#attachments')?.files)||[])) { fd.append('attachments', file, file.name); } try { toast('Sending message...'); const r = await window.apiFetch('/api/whatsapp/send', { method: 'POST', body: fd }); const data = await r.json(); if (!r.ok) throw new Error(data.error || 'Could not send message.'); data.results.forEach(x=>db.logs.unshift({status:x.status,title:`${x.status==='success'?'Message sent':'Failed'}: ${x.name}`,message:x.error||message.slice(0,100),time:formatTs(x.sentAt||x.attemptedAt)})); save(); renderDashboard(); toast(`Sent to ${data.results.filter(x=>x.status==='success').length} of ${data.results.length} groups.`); form.reset(); renderPreview(); } catch(err){ toast(err.message||'Start the Node server and connect WhatsApp first.') } };
   }
 }if(page==='Message Templates'){$('#addTemplate').onsubmit=x=>{x.preventDefault();let f=new FormData(x.target);db.templates.push({name:f.get('name'),text:f.get('text')});save();show(page)};other.querySelectorAll('[data-delt]').forEach(b=>b.onclick=()=>{db.templates.splice(b.dataset.delt,1);save();show(page)});other.querySelectorAll('[data-use]').forEach(b=>b.onclick=()=>{dash.style.display='block';other.style.display='none';$('#message').value=db.templates[b.dataset.use].text;$('#count').textContent=$('#message').value.length;toast('Template loaded in Quick Send.')})}if(page==='Delivery Logs')$('#clearLogs').onclick=()=>{db.logs=[];save();show(page);renderDashboard()};if(page==='Reports & Analytics')$('#export').onclick=()=>{let csv='Status,Title,Message,Time\n'+db.logs.map(x=>[x.status,x.title,x.message,x.time].map(v=>'"'+String(v).replaceAll('"','""')+'"').join(',')).join('\n'),a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='delivery-report.csv';a.click()};if(page==='User Management'){$('#addUser').onsubmit=x=>{x.preventDefault();db.users.push(Object.fromEntries(new FormData(x.target)));save();show(page)};other.querySelectorAll('[data-delu]').forEach(b=>b.onclick=()=>{db.users.splice(b.dataset.delu,1);save();show(page)})}}
 function show(page){let html={Groups:groups,'Send Message':send,'Message Templates':templates,'Delivery Logs':logs,'Reports & Analytics':reports,'User Management':users,Settings:settings}[page];other.innerHTML=html();wire(page)}
@@ -118,7 +122,7 @@ $('#sendBtn').onclick = async () => {
   if (files.length > 0) {
     const fd = new FormData(); if (message) fd.append('message', message); fd.append('groups', JSON.stringify(groupsArr));
     for (const file of files) fd.append('attachments', file, file.name);
-    try { toast('Sending message...'); const r = await fetch('/api/whatsapp/send', { method: 'POST', body: fd }); const data = await r.json(); if (!r.ok) throw new Error(data.error || 'Could not send message.'); data.results.forEach(x=>db.logs.unshift({status:x.status,title:`${x.status==='success'?'Message sent':'Failed'}: ${x.name}`,message:x.error||message.slice(0,100),time:formatTs(x.sentAt||x.attemptedAt)})); save(); renderDashboard(); toast(`Sent to ${data.results.filter(x=>x.status==='success').length} of ${data.results.length} groups.`); // reset
+    try { toast('Sending message...'); const r = await window.apiFetch('/api/whatsapp/send', { method: 'POST', body: fd }); const data = await r.json(); if (!r.ok) throw new Error(data.error || 'Could not send message.'); data.results.forEach(x=>db.logs.unshift({status:x.status,title:`${x.status==='success'?'Message sent':'Failed'}: ${x.name}`,message:x.error||message.slice(0,100),time:formatTs(x.sentAt||x.attemptedAt)})); save(); renderDashboard(); toast(`Sent to ${data.results.filter(x=>x.status==='success').length} of ${data.results.length} groups.`); // reset
       $('#message').value=''; $('#count').textContent=0; document.querySelector('#quickAttachments').value = ''; renderQuickPreview(); } catch (err) { toast(err.message||'Start the Node server and connect WhatsApp first.') }
   } else {
     // no attachments — use existing queue flow
@@ -127,4 +131,48 @@ $('#sendBtn').onclick = async () => {
   }
 };
 const modal=$('#modal');$('#scheduleBtn').onclick=()=>modal.classList.add('open');$('#closeModal').onclick=()=>modal.classList.remove('open');$('#saveSchedule').onclick=()=>{let m=$('#scheduleMessage').value,t=$('#scheduleTime').value;if(!m||!t)return toast('Enter message and time.');db.schedules.push({id:Date.now(),message:m,groups:'Selected groups',time:new Date(t).toLocaleString()});save();modal.classList.remove('open');renderDashboard();toast('Schedule saved.')};
-document.querySelectorAll('.nav-item').forEach(a=>a.onclick=x=>{x.preventDefault();let p=a.dataset.page;document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));a.classList.add('active');$('#pageTitle').textContent=p;$('#crumb').textContent=p;let home=p==='Dashboard'||p==='Scheduled Messages';dash.style.display=home?'block':'none';other.style.display=home?'none':'block';if(!home)show(p);if(innerWidth<760)$('#sidebar').classList.remove('open')});$('#menuBtn').onclick=()=>$('#sidebar').classList.toggle('open');
+function navigateToPage(page, updateHash = true) {
+  const link = document.querySelector(`.nav-item[data-page="${page}"]`);
+  if (!link) return;
+
+  document.querySelectorAll('.nav-item').forEach(item => item.classList.toggle('active', item === link));
+  $('#pageTitle').textContent = page;
+  $('#crumb').textContent = page;
+
+  const dashboardPage = page === 'Dashboard' || page === 'Scheduled Messages';
+  dash.style.display = dashboardPage ? 'block' : 'none';
+  other.style.display = dashboardPage ? 'none' : 'block';
+
+  if (page === 'Scheduled Messages' && typeof showScheduledModule === 'function') {
+    showScheduledModule();
+  } else if (page === 'Groups' && typeof renderWhatsAppDirectory === 'function') {
+    renderWhatsAppDirectory();
+  } else if (!dashboardPage) {
+    show(page);
+    if (page === 'Send Message' && typeof loadRecipientSelector === 'function') {
+      setTimeout(loadRecipientSelector, 0);
+    }
+  }
+
+  if (updateHash && window.location.hash !== link.getAttribute('href')) {
+    window.location.hash = link.getAttribute('href');
+  }
+  if (innerWidth < 760) $('#sidebar').classList.remove('open');
+}
+
+function routeFromHash() {
+  const link = [...document.querySelectorAll('.nav-item')]
+    .find(item => item.getAttribute('href') === window.location.hash)
+    || document.querySelector('.nav-item[data-page="Dashboard"]');
+  navigateToPage(link.dataset.page, false);
+}
+
+document.querySelectorAll('.nav-item').forEach(link => {
+  link.onclick = event => {
+    event.preventDefault();
+    navigateToPage(link.dataset.page);
+  };
+});
+window.addEventListener('hashchange', routeFromHash);
+if (window.location.hash) setTimeout(routeFromHash, 0);
+$('#menuBtn').onclick=()=>$('#sidebar').classList.toggle('open');
