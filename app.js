@@ -11,6 +11,29 @@ function toast(t){const n=$('#toast');n.textContent=t;n.classList.add('show');se
 function now(){return new Date().toLocaleString('en-GB',{dateStyle:'medium',timeStyle:'short'})}
 function formatTs(iso){ try { return iso ? new Date(iso).toLocaleString('en-GB',{dateStyle:'medium',timeStyle:'short'}) : now(); } catch { return now(); } }
 
+// External ERP/API sends happen outside this browser. Read their server-side
+// delivery result so they appear in the same dashboard activity and logs.
+async function syncServerDeliveryLogs(){
+  if (!localStorage.getItem('wa-auth-token')) return;
+  try {
+    const response = await window.apiFetch('/api/whatsapp/logs?limit=100');
+    if (!response.ok) return;
+    const data = await response.json();
+    const serverLogs = (data.logs || []).map(log => ({
+      serverLogId: log.id,
+      status: log.status,
+      title: `${log.status === 'success' ? 'API message sent' : 'API send failed'}: ${log.customerName || log.phone || 'Customer'}`,
+      message: log.error || log.message || log.reference || '',
+      time: formatTs(log.createdAt),
+      createdAt: log.createdAt
+    }));
+    const browserLogs = db.logs.filter(log => !log.serverLogId);
+    db.logs = [...serverLogs, ...browserLogs].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+    save();
+    if ($('#activityList')) renderDashboard();
+  } catch { /* dashboard remains usable when the API is temporarily offline */ }
+}
+
 // Reusable attachment setup for any file input + preview area
 function setupAttachmentHandlers(inputSelector, previewSelector) {
   const inp = () => document.querySelector(inputSelector);
@@ -77,7 +100,7 @@ function wire(page){if(page==='Groups'){$('#addGroup').onsubmit=x=>{x.preventDef
 }if(page==='Message Templates'){$('#addTemplate').onsubmit=x=>{x.preventDefault();let f=new FormData(x.target);db.templates.push({name:f.get('name'),text:f.get('text')});save();show(page)};other.querySelectorAll('[data-delt]').forEach(b=>b.onclick=()=>{db.templates.splice(b.dataset.delt,1);save();show(page)});other.querySelectorAll('[data-use]').forEach(b=>b.onclick=()=>{dash.style.display='block';other.style.display='none';$('#message').value=db.templates[b.dataset.use].text;$('#count').textContent=$('#message').value.length;toast('Template loaded in Quick Send.')})}if(page==='Delivery Logs')$('#clearLogs').onclick=()=>{db.logs=[];save();show(page);renderDashboard()};if(page==='Reports & Analytics')$('#export').onclick=()=>{let csv='Status,Title,Message,Time\n'+db.logs.map(x=>[x.status,x.title,x.message,x.time].map(v=>'"'+String(v).replaceAll('"','""')+'"').join(',')).join('\n'),a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='delivery-report.csv';a.click()};if(page==='User Management'){$('#addUser').onsubmit=x=>{x.preventDefault();db.users.push(Object.fromEntries(new FormData(x.target)));save();show(page)};other.querySelectorAll('[data-delu]').forEach(b=>b.onclick=()=>{db.users.splice(b.dataset.delu,1);save();show(page)})}}
 function show(page){let html={Groups:groups,'Send Message':send,'Message Templates':templates,'Delivery Logs':logs,'Reports & Analytics':reports,'User Management':users,Settings:settings}[page];other.innerHTML=html();wire(page)}
 // 3. EVENT LISTENERS — dashboard input and button actions
-renderDashboard();$('#message').oninput=()=>$('#count').textContent=$('#message').value.length;$('#clearBtn').onclick=()=>{$('#message').value='';$('#count').textContent=0};
+renderDashboard();syncServerDeliveryLogs();window.addEventListener('auth:success',syncServerDeliveryLogs);setInterval(syncServerDeliveryLogs,10000);$('#message').oninput=()=>$('#count').textContent=$('#message').value.length;$('#clearBtn').onclick=()=>{$('#message').value='';$('#count').textContent=0};
 
 // Quick send: support attachments in the dashboard quick compose
 const getQuickAttachmentFiles = () => Array.from(document.querySelectorAll('[data-quick-attachment]'))

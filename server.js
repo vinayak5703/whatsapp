@@ -20,6 +20,8 @@ const jwtSecret = process.env.JWT_SECRET || 'change-this-development-jwt-secret'
 const jwtExpiresIn = process.env.JWT_EXPIRES_IN || '30d';
 const incomingWebhookUrl = process.env.INCOMING_WEBHOOK_URL;
 const incomingWebhookSecret = process.env.INCOMING_WEBHOOK_SECRET;
+const deliveryLogs = [];
+const maxDeliveryLogs = 500;
 let databaseConnected = false;
 let supabase = null;
 
@@ -181,6 +183,11 @@ function getWhatsappId(rawId) {
   if (typeof rawId.id === 'string') return rawId.id;
   if (typeof rawId.user === 'string' && typeof rawId.server === 'string') return `${rawId.user}@${rawId.server}`;
   return '';
+}
+
+function recordDeliveryLog(entry) {
+  deliveryLogs.unshift({ id: crypto.randomUUID(), createdAt: new Date().toISOString(), ...entry });
+  if (deliveryLogs.length > maxDeliveryLogs) deliveryLogs.length = maxDeliveryLogs;
 }
 
 // Incoming messages can be forwarded to one configured ERP/CRM webhook. The
@@ -662,6 +669,7 @@ app.post('/api/integration/whatsapp/send', requireApiToken, upload.array('attach
   });
   if (!(await isConnected())) {
     cleanupFiles();
+    recordDeliveryLog({ status: 'failed', source: 'integration-api', customerName, phone: String(phone || ''), reference, message, error: 'WhatsApp is not connected.' });
     return res.status(409).json({ error: 'WhatsApp is not connected. Scan the QR code first.' });
   }
   // Accept common formatting (+91 98765-43210) but require a country code.
@@ -691,6 +699,7 @@ app.post('/api/integration/whatsapp/send', requireApiToken, upload.array('attach
         first = false;
       }
     }
+    recordDeliveryLog({ status: 'success', source: 'integration-api', customerName: typeof customerName === 'string' ? customerName : null, phone: digits, reference: typeof reference === 'string' ? reference : null, message, attachmentsSent: files.length });
     return res.status(200).json({
       success: true,
       customerName: typeof customerName === 'string' ? customerName : null,
@@ -701,6 +710,7 @@ app.post('/api/integration/whatsapp/send', requireApiToken, upload.array('attach
     });
   } catch (error) {
     console.error('Integration WhatsApp send failed:', error.message || error);
+    recordDeliveryLog({ status: 'failed', source: 'integration-api', customerName: typeof customerName === 'string' ? customerName : null, phone: digits, reference: typeof reference === 'string' ? reference : null, message, attachmentsSent: files.length, error: error.message || 'Unknown error' });
     return res.status(502).json({ error: 'WhatsApp could not send the message.', details: error.message || 'Unknown error' });
   } finally {
     cleanupFiles();
@@ -710,6 +720,12 @@ app.post('/api/integration/whatsapp/send', requireApiToken, upload.array('attach
 // All operations that expose a QR/session or send a WhatsApp message require
 // the shop owner's token. There is one connected sender number for this shop.
 app.use('/api/whatsapp', requireApiToken);
+
+app.get('/api/whatsapp/logs', (req, res) => {
+  const requested = Number.parseInt(req.query.limit, 10);
+  const limit = Number.isFinite(requested) ? Math.min(Math.max(requested, 1), 500) : 100;
+  res.json({ logs: deliveryLogs.slice(0, limit) });
+});
 
 app.get('/api/whatsapp/status', async (_req, res) => {
   // Keep startup failures visible. Retrying on every dashboard poll clears the
