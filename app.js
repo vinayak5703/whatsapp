@@ -30,6 +30,14 @@ async function syncServerDeliveryLogs(){
     const browserLogs = db.logs.filter(log => !log.serverLogId);
     db.logs = [...serverLogs, ...browserLogs].sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
     save();
+    const successful = db.logs.filter(log => log.status === 'success').length;
+    const failed = db.logs.filter(log => log.status === 'failed').length;
+    const total = successful + failed;
+    if ($('#messagesTotal')) $('#messagesTotal').textContent = total;
+    if ($('#messagesSuccess')) $('#messagesSuccess').textContent = successful;
+    if ($('#messagesFailed')) $('#messagesFailed').textContent = failed;
+    if ($('#successRate')) $('#successRate').textContent = total ? `${Math.round(successful / total * 100)}% delivered` : 'No deliveries yet';
+    if ($('#failedRate')) $('#failedRate').textContent = total ? `${Math.round(failed / total * 100)}% failed` : 'No failures yet';
     if ($('#activityList')) renderDashboard();
   } catch { /* dashboard remains usable when the API is temporarily offline */ }
 }
