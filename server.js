@@ -407,14 +407,19 @@ async function getWhatsappContacts() {
 }
 
 async function getWhatsappGroups() {
-  const chats = await getWhatsappChats();
-  const groupsFromChats = chats.filter(isWhatsappGroup);
-  if (groupsFromChats.length) return groupsFromChats;
+  // WhatsApp reports CONNECTED before its local chat store is always ready.
+  // Retry briefly instead of returning an intermittent empty group list.
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const chats = await getWhatsappChats();
+    const groupsFromChats = chats.filter(isWhatsappGroup);
+    if (groupsFromChats.length) return groupsFromChats;
 
-  // Some WhatsApp Web builds expose group entries through the contact store
-  // before they appear in the chat collection. Use that store as a fallback.
-  const contacts = await getWhatsappContacts();
-  return contacts.filter(isWhatsappGroup);
+    const contacts = await getWhatsappContacts();
+    const groupsFromContacts = contacts.filter(isWhatsappGroup);
+    if (groupsFromContacts.length) return groupsFromContacts;
+    if (attempt < 3) await wait(1000 * attempt);
+  }
+  return [];
 }
 
 
@@ -771,6 +776,16 @@ app.post('/api/whatsapp/disconnect', async (_req, res) => {
   try {
     state = 'disconnecting';
     qrDataUrl = null;
+    // Log out the WhatsApp Web linked device so it disappears from the phone's
+    // Linked devices list. The primary WhatsApp account on the phone stays on.
+    if (client && typeof client.logout === 'function') {
+      try {
+        await client.logout();
+        console.log('Logged out WhatsApp Web linked device.');
+      } catch (logoutError) {
+        console.warn('WhatsApp Web logout did not complete:', logoutError.message || logoutError);
+      }
+    }
     await safeDestroyWhatsappClient();
 
     const sessionPath = getSessionPath();
@@ -827,7 +842,12 @@ app.get('/api/whatsapp/groups', async (_req, res) => {
 app.get('/api/whatsapp/contacts', async (_req, res) => {
   if (!(await isConnected())) return res.status(409).json({ error: 'WhatsApp is not connected.' });
   try {
-    const contactsData = await getWhatsappContacts();
+    let contactsData = [];
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      contactsData = await getWhatsappContacts();
+      if (contactsData.length || attempt === 3) break;
+      await wait(1000 * attempt);
+    }
     const contacts = dedupeItems((Array.isArray(contactsData) ? contactsData : [])
       .filter(contact => !contact?.isGroup && contact?.id)
       .map(contact => {
