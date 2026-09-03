@@ -653,32 +653,57 @@ app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
 // Machine-to-machine endpoint for an ERP/billing system. When its order or
 // invoice is saved, it calls this endpoint; no dashboard action is required.
-app.post('/api/integration/whatsapp/send', requireApiToken, async (req, res) => {
-  if (!(await isConnected())) return res.status(409).json({ error: 'WhatsApp is not connected. Scan the QR code first.' });
-
+app.post('/api/integration/whatsapp/send', requireApiToken, upload.array('attachments'), async (req, res) => {
   const { phone, message: rawMessage, customerName, reference } = req.body || {};
   const message = typeof rawMessage === 'string' ? rawMessage.trim() : '';
+  const files = Array.isArray(req.files) ? req.files : [];
+  const cleanupFiles = () => files.forEach(file => {
+    try { fs.unlinkSync(file.path); } catch { /* temporary upload cleanup */ }
+  });
+  if (!(await isConnected())) {
+    cleanupFiles();
+    return res.status(409).json({ error: 'WhatsApp is not connected. Scan the QR code first.' });
+  }
   // Accept common formatting (+91 98765-43210) but require a country code.
   const digits = String(phone || '').replace(/\D/g, '').replace(/^00/, '');
   if (!/^\d{7,15}$/.test(digits)) {
+    cleanupFiles();
     return res.status(400).json({ error: 'phone must contain a valid mobile number with country code, for example 919876543210.' });
   }
-  if (!message) return res.status(400).json({ error: 'message is required.' });
-  if (message.length > 4096) return res.status(400).json({ error: 'message must be 4096 characters or fewer.' });
+  if (!message && files.length === 0) {
+    cleanupFiles();
+    return res.status(400).json({ error: 'message or at least one attachment is required.' });
+  }
+  if (message.length > 4096) {
+    cleanupFiles();
+    return res.status(400).json({ error: 'message must be 4096 characters or fewer.' });
+  }
 
   const recipientId = `${digits}@c.us`;
   try {
-    await client.sendMessage(recipientId, message);
+    if (files.length === 0) {
+      await client.sendMessage(recipientId, message);
+    } else {
+      let first = true;
+      for (const file of files) {
+        const media = MessageMedia.fromFilePath(file.path);
+        await client.sendMessage(recipientId, media, first && message ? { caption: message } : {});
+        first = false;
+      }
+    }
     return res.status(200).json({
       success: true,
       customerName: typeof customerName === 'string' ? customerName : null,
       phone: digits,
       reference: typeof reference === 'string' ? reference : null,
+      attachmentsSent: files.length,
       sentAt: new Date().toISOString()
     });
   } catch (error) {
     console.error('Integration WhatsApp send failed:', error.message || error);
     return res.status(502).json({ error: 'WhatsApp could not send the message.', details: error.message || 'Unknown error' });
+  } finally {
+    cleanupFiles();
   }
 });
 

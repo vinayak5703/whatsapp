@@ -72,6 +72,20 @@ Content-Type: application/json
 
 `phone` मध्ये country code आवश्यक आहे. `+`, space आणि `-` चालतील; API ते आपोआप काढून WhatsApp format बनवते. Success response मध्ये `success: true` आणि `sentAt` येईल. `409` म्हणजे WhatsApp QR/session अजून connected नाही; `401` म्हणजे token invalid किंवा expired आहे.
 
+### Image, video, PDF किंवा document पाठवणे
+
+File पाठवायची असल्यास हाच URL `multipart/form-data` ने call करा. Field names: `phone`, `message`, `customerName`, `reference`, आणि एक किंवा अनेक `attachments`. `message` पहिल्या file चा WhatsApp caption होतो. प्रति file कमाल size 25 MB आहे.
+
+```bash
+curl -X POST https://YOUR-DOMAIN/api/integration/whatsapp/send \
+  -H "Authorization: Bearer YOUR_30_DAY_TOKEN" \
+  -F "phone=+919876543210" \
+  -F "message=तुमचे invoice आणि product video खाली दिले आहेत." \
+  -F "attachments=@invoice.pdf" \
+  -F "attachments=@product-video.mp4" \
+  -F "attachments=@product-image.jpg"
+```
+
 ## 3. WhatsApp वर आलेला message ERP कडे automatic पाठवा
 
 `.env` मध्ये खालील server-side values द्या आणि server restart करा:
