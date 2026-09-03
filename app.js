@@ -80,11 +80,12 @@ function show(page){let html={Groups:groups,'Send Message':send,'Message Templat
 renderDashboard();$('#message').oninput=()=>$('#count').textContent=$('#message').value.length;$('#clearBtn').onclick=()=>{$('#message').value='';$('#count').textContent=0};
 
 // Quick send: support attachments in the dashboard quick compose
+const getQuickAttachmentFiles = () => Array.from(document.querySelectorAll('[data-quick-attachment]'))
+  .flatMap(input => Array.from(input.files || []));
 const renderQuickPreview = () => {
-  const inp = document.querySelector('#quickAttachments');
   const preview = document.querySelector('#quickAttachmentsPreview');
-  if (!inp || !preview) return; preview.innerHTML = '';
-  Array.from(inp.files || []).forEach(file => {
+  if (!preview) return; preview.innerHTML = '';
+  getQuickAttachmentFiles().forEach(file => {
     const wrap = document.createElement('div');
     wrap.style.maxWidth = '140px';
     wrap.style.border = '1px solid #e6e9ee';
@@ -106,8 +107,8 @@ const renderQuickPreview = () => {
   });
 };
 
-document.addEventListener('change', (e) => { if (e.target && e.target.id === 'quickAttachments') renderQuickPreview(); });
-const quickInp = document.querySelector('#quickAttachments'); if (quickInp) quickInp.onchange = renderQuickPreview;
+document.addEventListener('change', (e) => { if (e.target && e.target.matches('[data-quick-attachment]')) renderQuickPreview(); });
+document.querySelectorAll('[data-quick-attachment]').forEach(input => { input.onchange = renderQuickPreview; });
 
 // Ensure attachment handlers are active for both Send Message page and Quick Send
 setupAttachmentHandlers('#attachments','#attachmentsPreview');
@@ -118,16 +119,16 @@ $('#sendBtn').onclick = async () => {
   const message = $('#message').value.trim();
   const target = document.querySelector('.group-select select').value || 'all';
   const groupsArr = target === 'all' ? db.groups.filter(g=>g.active) : db.groups.filter(g=>g.name===target);
-  if ((!message || message.length===0) && (document.querySelector('#quickAttachments')?.files.length===0)) return toast('Message or at least one attachment is required.');
+  if ((!message || message.length===0) && getQuickAttachmentFiles().length===0) return toast('Message or at least one attachment is required.');
   if (!groupsArr.length) return toast('Select a WhatsApp group.');
 
   // If there are quick attachments, send multipart, otherwise fallback to queue()
-  const files = Array.from((document.querySelector('#quickAttachments')?.files)||[]);
+  const files = getQuickAttachmentFiles();
   if (files.length > 0) {
     const fd = new FormData(); if (message) fd.append('message', message); fd.append('groups', JSON.stringify(groupsArr));
     for (const file of files) fd.append('attachments', file, file.name);
     try { toast('Sending message...'); const r = await window.apiFetch('/api/whatsapp/send', { method: 'POST', body: fd }); const data = await r.json(); if (!r.ok) throw new Error(data.error || 'Could not send message.'); data.results.forEach(x=>db.logs.unshift({status:x.status,title:`${x.status==='success'?'Message sent':'Failed'}: ${x.name}`,message:x.error||message.slice(0,100),time:formatTs(x.sentAt||x.attemptedAt)})); save(); renderDashboard(); toast(`Sent to ${data.results.filter(x=>x.status==='success').length} of ${data.results.length} groups.`); // reset
-      $('#message').value=''; $('#count').textContent=0; document.querySelector('#quickAttachments').value = ''; renderQuickPreview(); } catch (err) { toast(err.message||'Start the Node server and connect WhatsApp first.') }
+      $('#message').value=''; $('#count').textContent=0; document.querySelectorAll('[data-quick-attachment]').forEach(input => { input.value = ''; }); renderQuickPreview(); } catch (err) { toast(err.message||'Start the Node server and connect WhatsApp first.') }
   } else {
     // no attachments — use existing queue flow
     queue(message, target);
