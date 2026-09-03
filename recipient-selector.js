@@ -42,9 +42,14 @@ async function loadRecipientSelector() {
         ${contacts.map(x => `<label class="recipient-option" style="display:flex;gap:9px;align-items:center;padding:7px 5px;margin:0"><input class="recipient-check" type="checkbox" data-id="${x.id}" data-name="${x.name}" data-type="contact"> <span>${x.name} <small style="color:#71808e">Contact</small></span></label>`).join('')}
       </div>
       <label>Attachments</label>
-      <input id="attachments" type="file" multiple accept="image/*,video/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+      <div class="media-upload-grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">
+        <label style="margin:0">🖼️ Images<input data-send-attachment type="file" multiple accept="image/*" /></label>
+        <label style="margin:0">🎥 Videos<input data-send-attachment type="file" multiple accept="video/*" /></label>
+        <label style="margin:0">📄 PDF<input data-send-attachment type="file" multiple accept="application/pdf" /></label>
+        <label style="margin:0">📎 Documents<input data-send-attachment type="file" multiple accept=".doc,.docx,.xls,.xlsx,.txt" /></label>
+      </div>
       <div id="attachmentsPreview" style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"></div>
-      <p style="color:#71808e;font-size:12px;margin-top:8px">You can attach images, PDFs or documents (max 25MB per file). Message text will be added as a caption to the first attachment.</p>
+      <p style="color:#71808e;font-size:12px;margin-top:8px">Select multiple files in each section. Max 25MB per file; message becomes the first attachment caption.</p>
       <button class="primary" style="margin-top:14px">Send to selected</button>`;
     document.querySelector('#recipientSearch').oninput = event => {
       const search = event.target.value.toLowerCase();
@@ -61,11 +66,10 @@ async function loadRecipientSelector() {
       updateSelectionCount();
     });
     const renderPreview = () => {
-      const input = document.querySelector('#attachments');
       const preview = document.querySelector('#attachmentsPreview');
-      if (!input || !preview) return;
+      if (!preview) return;
       preview.innerHTML = '';
-      Array.from(input.files || []).forEach(file => {
+      Array.from(document.querySelectorAll('[data-send-attachment]')).flatMap(input => Array.from(input.files || [])).forEach(file => {
         const wrap = document.createElement('div');
         wrap.style.maxWidth = '140px'; wrap.style.border = '1px solid #e6e9ee'; wrap.style.padding = '6px'; wrap.style.borderRadius = '6px'; wrap.style.fontSize = '12px'; wrap.style.background = '#fff';
         if (file.type && file.type.startsWith('image/')) {
@@ -79,7 +83,7 @@ async function loadRecipientSelector() {
         preview.appendChild(wrap);
       });
     };
-    const attachmentsInput = document.querySelector('#attachments'); if (attachmentsInput) attachmentsInput.onchange = renderPreview;
+    document.querySelectorAll('[data-send-attachment]').forEach(input => { input.onchange = renderPreview; });
     form.onsubmit = async event => {
       event.preventDefault();
       const message = new FormData(form).get('message');
@@ -87,7 +91,7 @@ async function loadRecipientSelector() {
       if (!recipients.length) return showRecipientToast('Select at least one group or contact.');
       showRecipientToast('Sending message...');
       try {
-        const attachments = Array.from(document.querySelector('#attachments')?.files || []);
+        const attachments = Array.from(document.querySelectorAll('[data-send-attachment]')).flatMap(input => Array.from(input.files || []));
         let response;
         if (attachments.length > 0) {
           const fd = new FormData();
@@ -109,7 +113,7 @@ async function loadRecipientSelector() {
         if (typeof renderDashboard === 'function') renderDashboard();
         updateDynamicDashboard();
         showRecipientToast(`Sent to ${sent} of ${result.results.length} selected recipients.`);
-        document.querySelector('#attachments').value = '';
+        document.querySelectorAll('[data-send-attachment]').forEach(input => { input.value = ''; });
         renderPreview();
       } catch (error) { showRecipientToast(error.message || 'Could not send message.'); }
     };
