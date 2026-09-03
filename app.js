@@ -1,3 +1,4 @@
+// 1. VARIABLES — default data, saved browser data and commonly used elements
 const D={groups:[{name:'Sales Team',id:'1203630•••1101',active:true},{name:'Marketing Team',id:'1203630•••2234',active:true},{name:'HR Team',id:'1203630•••8892',active:true}],people:[],templates:[{name:'Good Morning',text:'Good morning everyone! Have a productive day.'}],users:[{name:'Admin User',email:'admin@example.com',role:'Administrator'}],logs:[],schedules:[{id:1,message:'Good Morning Everyone!',groups:'15 Groups',time:'27 May 2026 09:00 AM'}]};
 let savedData={};
 try { savedData=JSON.parse(localStorage.getItem('wa-bot-data')||'{}')||{}; } catch { localStorage.removeItem('wa-bot-data'); }
@@ -5,6 +6,7 @@ let db={...D,...savedData};
 for(const key of ['groups','people','templates','users','logs','schedules']) if(!Array.isArray(db[key])) db[key]=D[key];
 const $=s=>document.querySelector(s), other=$('#otherPage'), dash=$('#dashboard');
 const save=()=>localStorage.setItem('wa-bot-data',JSON.stringify(db));const e=s=>String(s).replace(/[&<>"']/g,x=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[x]));
+// 2. FUNCTIONS — helpers, UI rendering, local storage and message sending
 function toast(t){const n=$('#toast');n.textContent=t;n.classList.add('show');setTimeout(()=>n.classList.remove('show'),2500)}
 function now(){return new Date().toLocaleString('en-GB',{dateStyle:'medium',timeStyle:'short'})}
 function formatTs(iso){ try { return iso ? new Date(iso).toLocaleString('en-GB',{dateStyle:'medium',timeStyle:'short'}) : now(); } catch { return now(); } }
@@ -74,6 +76,7 @@ function wire(page){if(page==='Groups'){$('#addGroup').onsubmit=x=>{x.preventDef
   }
 }if(page==='Message Templates'){$('#addTemplate').onsubmit=x=>{x.preventDefault();let f=new FormData(x.target);db.templates.push({name:f.get('name'),text:f.get('text')});save();show(page)};other.querySelectorAll('[data-delt]').forEach(b=>b.onclick=()=>{db.templates.splice(b.dataset.delt,1);save();show(page)});other.querySelectorAll('[data-use]').forEach(b=>b.onclick=()=>{dash.style.display='block';other.style.display='none';$('#message').value=db.templates[b.dataset.use].text;$('#count').textContent=$('#message').value.length;toast('Template loaded in Quick Send.')})}if(page==='Delivery Logs')$('#clearLogs').onclick=()=>{db.logs=[];save();show(page);renderDashboard()};if(page==='Reports & Analytics')$('#export').onclick=()=>{let csv='Status,Title,Message,Time\n'+db.logs.map(x=>[x.status,x.title,x.message,x.time].map(v=>'"'+String(v).replaceAll('"','""')+'"').join(',')).join('\n'),a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='delivery-report.csv';a.click()};if(page==='User Management'){$('#addUser').onsubmit=x=>{x.preventDefault();db.users.push(Object.fromEntries(new FormData(x.target)));save();show(page)};other.querySelectorAll('[data-delu]').forEach(b=>b.onclick=()=>{db.users.splice(b.dataset.delu,1);save();show(page)})}}
 function show(page){let html={Groups:groups,'Send Message':send,'Message Templates':templates,'Delivery Logs':logs,'Reports & Analytics':reports,'User Management':users,Settings:settings}[page];other.innerHTML=html();wire(page)}
+// 3. EVENT LISTENERS — dashboard input and button actions
 renderDashboard();$('#message').oninput=()=>$('#count').textContent=$('#message').value.length;$('#clearBtn').onclick=()=>{$('#message').value='';$('#count').textContent=0};
 
 // Quick send: support attachments in the dashboard quick compose
@@ -110,6 +113,7 @@ const quickInp = document.querySelector('#quickAttachments'); if (quickInp) quic
 setupAttachmentHandlers('#attachments','#attachmentsPreview');
 setupAttachmentHandlers('#quickAttachments','#quickAttachmentsPreview');
 
+// 4. API CALLS — this handler calls /api/whatsapp/send through window.apiFetch
 $('#sendBtn').onclick = async () => {
   const message = $('#message').value.trim();
   const target = document.querySelector('.group-select select').value || 'all';

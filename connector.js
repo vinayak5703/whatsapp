@@ -1,3 +1,7 @@
+// 1. VARIABLES
+let refreshingGroups = false;
+
+// 2. FUNCTIONS — safe requests and WhatsApp group synchronization
 async function fetchJsonSafe(url, options) {
   const response = await (window.apiFetch ? window.apiFetch(url, options) : fetch(url, options));
   const contentType = response.headers.get('content-type') || '';
@@ -22,6 +26,7 @@ async function fetchJsonSafe(url, options) {
   return body;
 }
 
+// 3. EVENT LISTENERS — Settings page Connect and Disconnect buttons
 document.addEventListener('click', async event => {
   const target = event.target;
   if (target.id !== 'checkConnection' && target.id !== 'disconnectWhatsApp') return;
@@ -62,7 +67,7 @@ document.addEventListener('click', async event => {
   }
 });
 
-let refreshingGroups = false;
+// 4. API CALLS — reads live groups from /api/whatsapp/groups
 async function syncWhatsAppGroups() {
   try {
     const response = await window.apiFetch('/api/whatsapp/groups');
@@ -82,3 +87,4 @@ async function syncWhatsAppGroups() {
 
 // Show the connected account's actual group count immediately after page load.
 syncWhatsAppGroups();
+window.addEventListener('auth:success', syncWhatsAppGroups);

@@ -1,3 +1,6 @@
+// 1. VARIABLES — dashboard state is stored in the shared `db` object
+
+// 2. FUNCTIONS — refresh cards and render scheduled-message screen
 async function refreshLiveDashboard() {
   try {
     const [groupsResponse, contactsResponse] = await Promise.all([window.apiFetch('/api/whatsapp/groups'), window.apiFetch('/api/whatsapp/contacts')]);
@@ -28,6 +31,7 @@ function showScheduledModule() {
   });
 }
 
+// 3. EVENT LISTENERS — route, card click, focus and timed refresh events
 window.addEventListener('app:route', event => {
   if (event.detail?.page === 'Scheduled Messages') showScheduledModule();
 });
@@ -43,3 +47,4 @@ document.querySelectorAll('.stat-card').forEach((card, index) => {
 refreshLiveDashboard();
 setInterval(refreshLiveDashboard, 30000);
 window.addEventListener('focus', refreshLiveDashboard);
+window.addEventListener('auth:success', refreshLiveDashboard);

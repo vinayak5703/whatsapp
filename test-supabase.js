@@ -1,3 +1,4 @@
+// 1. VARIABLES — environment values and Supabase client configuration
 import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
 import { inspect } from 'node:util';
@@ -36,6 +37,7 @@ if (isPublishableKey) {
 
 const supabase = createClient(supabaseUrl, rawSupabaseKey);
 
+// 2. FUNCTIONS — prints detailed connection errors safely
 function logConnectionError(label, error) {
   console.error(label, error instanceof Error ? error.message : error);
   console.error('Error details:', inspect(error, { depth: 4, showHidden: true }));
@@ -52,6 +54,7 @@ function logConnectionError(label, error) {
   }
 }
 
+// 4. API CALLS — checks Supabase Admin API access
 (async () => {
   try {
     const { data, error } = await supabase.auth.admin.listUsers({ perPage: 1 });

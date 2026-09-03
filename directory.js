@@ -1,3 +1,6 @@
+// 1. VARIABLES — page elements are read inside the function when needed
+
+// 2. FUNCTIONS — creates the live Groups and Contacts directory
 async function renderWhatsAppDirectory() {
   const page = document.querySelector('#otherPage');
   if (!page || page.style.display === 'none') return;
@@ -49,6 +52,7 @@ async function renderWhatsAppDirectory() {
   }
 }
 
+// 3. EVENT LISTENERS — load the directory when the Groups route opens
 window.addEventListener('app:route', event => {
   if (event.detail?.page === 'Groups') renderWhatsAppDirectory();
 });

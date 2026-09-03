@@ -1,3 +1,4 @@
+# 1. VARIABLES / CONFIGURATION — Node runtime image and deployment instructions
 FROM node:24-bullseye-slim
 
 RUN apt-get update \

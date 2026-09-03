@@ -1,3 +1,6 @@
+// 1. VARIABLES — selected recipients are read from checkbox elements
+
+// 2. FUNCTIONS — recipient selector, preview and dashboard counters
 function showRecipientToast(message) {
   const toast = document.querySelector('#toast');
   toast.textContent = message;
@@ -115,6 +118,7 @@ async function loadRecipientSelector() {
   }
 }
 
+// 3. EVENT LISTENERS — load selector on route change/page load
 window.addEventListener('app:route', event => {
   if (event.detail?.page === 'Send Message') setTimeout(loadRecipientSelector, 0);
 });

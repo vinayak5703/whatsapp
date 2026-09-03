@@ -1,3 +1,4 @@
+# 1. VARIABLES / CONFIGURATION — Fly.io deployment settings
 app = "whatsapp-group-messaging-bot"
 
 kill_signal = "SIGINT"

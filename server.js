@@ -7,14 +7,19 @@ import pkg from 'whatsapp-web.js';
 import dotenv from 'dotenv';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 
 dotenv.config();
 
+// 1. VARIABLES — Express, environment settings, Supabase and WhatsApp state
 const { Client, LocalAuth, MessageMedia } = pkg;
 const app = express();
 const port = process.env.PORT || 3000;
 const jwtSecret = process.env.JWT_SECRET || 'change-this-development-jwt-secret';
+const jwtExpiresIn = process.env.JWT_EXPIRES_IN || '30d';
+const incomingWebhookUrl = process.env.INCOMING_WEBHOOK_URL;
+const incomingWebhookSecret = process.env.INCOMING_WEBHOOK_SECRET;
 let databaseConnected = false;
 let supabase = null;
 
@@ -38,6 +43,7 @@ console.log('Supabase configuration:', {
   url: supabaseUrl || null
 });
 
+// 2. FUNCTIONS — database setup, WhatsApp session handling and helper methods
 async function initializeSupabase() {
   if (!supabaseUrl || !rawSupabaseKey) {
     console.log('Supabase is not configured. Set SUPABASE_URL and SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY in environment variables.');
@@ -85,6 +91,7 @@ if (!databaseConnected) {
 
 // Keep the dashboard available if the WhatsApp Web session closes or expires.
 // The user can then reconnect from Settings without losing the web server.
+// 3. EVENT LISTENERS — keep server alive if WhatsApp session throws an error
 process.on('unhandledRejection', error => console.error('WhatsApp session error:', error));
 process.on('uncaughtException', error => console.error('WhatsApp session error:', error));
 
@@ -176,6 +183,40 @@ function getWhatsappId(rawId) {
   return '';
 }
 
+// Incoming messages can be forwarded to one configured ERP/CRM webhook. The
+// URL is server configuration, never request input, so this is not an open proxy.
+async function forwardIncomingMessage(message) {
+  if (!incomingWebhookUrl || message.fromMe || message.isStatus) return;
+
+  const payload = JSON.stringify({
+    event: 'whatsapp.message.received',
+    occurredAt: new Date().toISOString(),
+    message: {
+      id: message.id?._serialized || null,
+      from: message.from || null,
+      to: message.to || null,
+      body: message.body || '',
+      type: message.type || 'chat',
+      hasMedia: Boolean(message.hasMedia),
+      isGroup: String(message.from || '').endsWith('@g.us')
+    }
+  });
+  const headers = { 'Content-Type': 'application/json' };
+  if (incomingWebhookSecret) {
+    headers['X-Webhook-Signature'] = `sha256=${crypto.createHmac('sha256', incomingWebhookSecret).update(payload).digest('hex')}`;
+  }
+
+  try {
+    const response = await fetch(incomingWebhookUrl, {
+      method: 'POST', headers, body: payload, signal: AbortSignal.timeout(10000)
+    });
+    if (!response.ok) console.error('Incoming webhook rejected message:', response.status);
+  } catch (error) {
+    // A partner-system outage must not interrupt the WhatsApp client.
+    console.error('Incoming webhook delivery failed:', error.message || error);
+  }
+}
+
 function isWhatsappGroup(item) {
   const id = getWhatsappId(item?.id || item?.wid || item);
   const server = item?.id?.server || item?.wid?.server || '';
@@ -186,6 +227,9 @@ function isWhatsappGroup(item) {
     id.endsWith('@g.us')
   );
 }
+
+const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+const isTransientWhatsappFrameError = error => /Execution context was destroyed|detached Frame|Target closed|Session closed|frame was detached/i.test(error?.message || String(error));
 
 function dedupeItems(items) {
   const seen = new Map();
@@ -200,19 +244,33 @@ function dedupeItems(items) {
 }
 
 async function getWhatsappChats() {
-  if (typeof client?.getChats === 'function') {
-    try {
-      const chats = normalizeWhatsappCollection(await client.getChats());
-      if (chats.length) return dedupeItems(chats);
-    } catch (error) {
-      console.error('getWhatsappChats client.getChats error:', error.message || error);
+  const whatsappClient = client;
+  if (!whatsappClient) return [];
+
+  if (typeof whatsappClient.getChats === 'function') {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        if (whatsappClient !== client) return [];
+        const chats = normalizeWhatsappCollection(await whatsappClient.getChats());
+        if (chats.length) return dedupeItems(chats);
+        break;
+      } catch (error) {
+        if (!isTransientWhatsappFrameError(error) || attempt === 3) {
+          console.error('getWhatsappChats client.getChats error:', error.message || error);
+          break;
+        }
+        await wait(attempt * 400);
+      }
     }
   }
 
-  if (client?.pupPage) {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    if (whatsappClient !== client) return [];
+    const page = whatsappClient.pupPage;
+    if (!page) break;
     try {
-      await client.pupPage.waitForFunction('window.WWebJS != undefined', { timeout: 20000 });
-      const fallbackChats = await client.pupPage.evaluate(async () => {
+      await page.waitForFunction('window.WWebJS != undefined', { timeout: 5000 });
+      const fallbackChats = await page.evaluate(async () => {
         const getArray = value => {
           if (!value) return [];
           if (Array.isArray(value)) return value;
@@ -253,7 +311,11 @@ async function getWhatsappChats() {
       });
       if (Array.isArray(fallbackChats)) return dedupeItems(fallbackChats);
     } catch (error) {
-      console.error('getWhatsappChats fallback error:', error.message || error);
+      if (!isTransientWhatsappFrameError(error) || attempt === 3) {
+        console.error('getWhatsappChats fallback error:', error.message || error);
+        break;
+      }
+      await wait(attempt * 400);
     }
   }
 
@@ -261,19 +323,33 @@ async function getWhatsappChats() {
 }
 
 async function getWhatsappContacts() {
-  if (typeof client?.getContacts === 'function') {
-    try {
-      const contacts = normalizeWhatsappCollection(await client.getContacts());
-      if (contacts.length) return dedupeItems(contacts);
-    } catch (error) {
-      console.error('getWhatsappContacts client.getContacts error:', error.message || error);
+  const whatsappClient = client;
+  if (!whatsappClient) return [];
+
+  if (typeof whatsappClient.getContacts === 'function') {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        if (whatsappClient !== client) return [];
+        const contacts = normalizeWhatsappCollection(await whatsappClient.getContacts());
+        if (contacts.length) return dedupeItems(contacts);
+        break;
+      } catch (error) {
+        if (!isTransientWhatsappFrameError(error) || attempt === 3) {
+          console.error('getWhatsappContacts client.getContacts error:', error.message || error);
+          break;
+        }
+        await wait(attempt * 400);
+      }
     }
   }
 
-  if (client?.pupPage) {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    if (whatsappClient !== client) return [];
+    const page = whatsappClient.pupPage;
+    if (!page) break;
     try {
-      await client.pupPage.waitForFunction('window.WWebJS != undefined', { timeout: 20000 });
-      const fallbackContacts = await client.pupPage.evaluate(async () => {
+      await page.waitForFunction('window.WWebJS != undefined', { timeout: 5000 });
+      const fallbackContacts = await page.evaluate(async () => {
         const getArray = value => {
           if (!value) return [];
           if (Array.isArray(value)) return value;
@@ -312,7 +388,11 @@ async function getWhatsappContacts() {
       });
       if (Array.isArray(fallbackContacts)) return dedupeItems(fallbackContacts);
     } catch (error) {
-      console.error('getWhatsappContacts fallback error:', error.message || error);
+      if (!isTransientWhatsappFrameError(error) || attempt === 3) {
+        console.error('getWhatsappContacts fallback error:', error.message || error);
+        break;
+      }
+      await wait(attempt * 400);
     }
   }
 
@@ -376,6 +456,10 @@ function registerEvents() {
     qrDataUrl = null;
     account = client.info?.wid?.user || null;
     console.log('WhatsApp connected.');
+  });
+
+  client.on('message', message => {
+    forwardIncomingMessage(message);
   });
 
   client.on('auth_failure', message => {
@@ -479,6 +563,7 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage, limits: { fileSize: 25 * 1024 * 1024 } }); // 25 MB per file
 
+// 4. API CALLS / ROUTES — frontend requests are handled below
 app.get('/api/auth/status', (_req, res) => res.json({ databaseConnected }));
 
 app.post('/api/auth/register', async (req, res) => {
@@ -502,7 +587,7 @@ app.post('/api/auth/register', async (req, res) => {
       throw error;
     }
 
-    const token = jwt.sign({ id: user.id, role: user.user_metadata?.role || 'Administrator' }, jwtSecret, { expiresIn: '8h' });
+    const token = jwt.sign({ id: user.id, customerId: user.id, role: user.user_metadata?.role || 'Administrator' }, jwtSecret, { expiresIn: jwtExpiresIn });
     res.status(201).json({
       token,
       user: {
@@ -532,7 +617,8 @@ app.post('/api/auth/login', async (req, res) => {
 
     const user = data.user;
     const role = user.user_metadata?.role || 'Operator';
-    const token = jwt.sign({ id: user.id, role }, jwtSecret, { expiresIn: '8h' });
+    // customerId is server-derived; a caller cannot impersonate another customer.
+    const token = jwt.sign({ id: user.id, customerId: user.id, role }, jwtSecret, { expiresIn: jwtExpiresIn });
     res.json({
       token,
       user: {
@@ -545,6 +631,60 @@ app.post('/api/auth/login', async (req, res) => {
     res.status(500).json({ error: error.message || 'Could not authenticate user.' });
   }
 });
+
+// A logged-in shop account is the API owner. Its 30-day Bearer token is used
+// by both this dashboard and an external billing/ERP/order-management system.
+function requireApiToken(req, res, next) {
+  const authorization = req.headers.authorization || '';
+  const match = authorization.match(/^Bearer\s+(.+)$/i);
+  if (!match) return res.status(401).json({ error: 'Authorization token is required. Use: Authorization: Bearer <token>' });
+
+  try {
+    req.apiUser = jwt.verify(match[1], jwtSecret);
+    next();
+  } catch (error) {
+    const expired = error?.name === 'TokenExpiredError';
+    return res.status(401).json({ error: expired ? 'Token expired. Login again to get a new 30-day token.' : 'Invalid authorization token.' });
+  }
+}
+
+// This remains public only so the browser can discover the running API port.
+app.get('/api/health', (_req, res) => res.json({ ok: true }));
+
+// Machine-to-machine endpoint for an ERP/billing system. When its order or
+// invoice is saved, it calls this endpoint; no dashboard action is required.
+app.post('/api/integration/whatsapp/send', requireApiToken, async (req, res) => {
+  if (!(await isConnected())) return res.status(409).json({ error: 'WhatsApp is not connected. Scan the QR code first.' });
+
+  const { phone, message: rawMessage, customerName, reference } = req.body || {};
+  const message = typeof rawMessage === 'string' ? rawMessage.trim() : '';
+  // Accept common formatting (+91 98765-43210) but require a country code.
+  const digits = String(phone || '').replace(/\D/g, '').replace(/^00/, '');
+  if (!/^\d{7,15}$/.test(digits)) {
+    return res.status(400).json({ error: 'phone must contain a valid mobile number with country code, for example 919876543210.' });
+  }
+  if (!message) return res.status(400).json({ error: 'message is required.' });
+  if (message.length > 4096) return res.status(400).json({ error: 'message must be 4096 characters or fewer.' });
+
+  const recipientId = `${digits}@c.us`;
+  try {
+    await client.sendMessage(recipientId, message);
+    return res.status(200).json({
+      success: true,
+      customerName: typeof customerName === 'string' ? customerName : null,
+      phone: digits,
+      reference: typeof reference === 'string' ? reference : null,
+      sentAt: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Integration WhatsApp send failed:', error.message || error);
+    return res.status(502).json({ error: 'WhatsApp could not send the message.', details: error.message || 'Unknown error' });
+  }
+});
+
+// All operations that expose a QR/session or send a WhatsApp message require
+// the shop owner's token. There is one connected sender number for this shop.
+app.use('/api/whatsapp', requireApiToken);
 
 app.get('/api/whatsapp/status', async (_req, res) => {
   // Keep startup failures visible. Retrying on every dashboard poll clears the

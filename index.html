@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="en">
   <head>
+    <!-- 1. VARIABLES / CONFIGURATION: metadata, fonts, CSS and API helper -->
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>WhatsApp Messaging Bot</title>
@@ -37,7 +38,7 @@
 
         async function canReachApi(base) {
           try {
-            const response = await fetch(`${base}/api/whatsapp/status`, {
+            const response = await fetch(`${base}/api/health`, {
               method: 'GET',
               mode: 'cors',
               cache: 'no-store',
@@ -66,12 +67,16 @@
         window.apiFetch = async function (path, options) {
           const base = await window.getApiBaseUrl();
           const url = new URL(path, base).toString();
-          return fetch(url, { ...options, mode: 'cors' });
+          const headers = new Headers(options?.headers || {});
+          const token = localStorage.getItem('wa-auth-token');
+          if (token && !headers.has('Authorization')) headers.set('Authorization', `Bearer ${token}`);
+          return fetch(url, { ...options, headers, mode: 'cors' });
         };
       })();
     </script>
   </head>
   <body>
+    <!-- 2. FUNCTIONS / UI STRUCTURE: login screen, sidebar and dashboard markup -->
     <section class="login-screen" id="loginScreen">
       <div class="login-art"><div class="login-logo">◔</div><h1>WhatsApp<br>Messaging Bot</h1><p>One secure space for groups, broadcasts and delivery insights.</p><div class="login-points"><span>✓&nbsp; Live WhatsApp groups</span><span>✓&nbsp; Controlled bulk messaging</span><span>✓&nbsp; Delivery activity reports</span></div></div>
       <div class="login-panel"><div class="login-form"><span class="eyebrow">WELCOME BACK</span><h2 id="authTitle">Sign in to your account</h2><p id="authSub">Manage every conversation from one dashboard.</p><form id="authForm"><div id="nameField" class="hidden"><label>Full name</label><input name="name" placeholder="Your full name" /></div><label>Email address</label><input name="email" type="email" required placeholder="you@example.com" /><label>Password</label><input name="password" type="password" required minlength="6" placeholder="Minimum 6 characters" /><button class="primary login-submit" id="authSubmit">Sign In</button></form><p class="auth-switch" id="authSwitch">New here? <button>Create an account</button></p><p class="auth-error" id="authError"></p></div></div>
@@ -113,6 +118,7 @@
     </div>
     <div class="modal-backdrop" id="modal"><div class="modal"><button class="close" id="closeModal">×</button><h2>Create Schedule</h2><p>Schedule a message to selected WhatsApp groups.</p><label>Message</label><textarea id="scheduleMessage" placeholder="Enter your message"></textarea><label>Delivery time</label><input id="scheduleTime" type="datetime-local" /><button class="primary full" id="saveSchedule">Save Schedule</button></div></div>
     <div class="toast" id="toast">Message queued for delivery!</div>
+    <!-- 3. EVENT LISTENERS: fallback helper for dynamic attachment input -->
     <script>
       (function ensureAttachments(){
         function insertIfMissing(){
@@ -132,6 +138,7 @@
         window.__ensureAttachments = insertIfMissing;
       })();
     </script>
+    <!-- 4. API CALLS: the following scripts call the backend through window.apiFetch -->
     <script src="app.js?v=20260830T160000"></script>
     <script src="connector.js?v=20260728T140900"></script>
     <script src="recipient-selector.js?v=20260830T153000"></script>

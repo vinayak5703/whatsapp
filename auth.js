@@ -1,7 +1,9 @@
+// 1. VARIABLES
 const loginScreen = document.querySelector('#loginScreen');
 const authForm = document.querySelector('#authForm');
 let registerMode = false;
 
+// 2. FUNCTIONS
 function setAuthMode(register) {
   registerMode = register;
   document.querySelector('#authTitle').textContent = register ? 'Create your account' : 'Sign in to your account';
@@ -11,7 +13,9 @@ function setAuthMode(register) {
   document.querySelector('#authSwitch').innerHTML = register ? 'Already have an account? <button>Sign in</button>' : 'New here? <button>Create an account</button>';
   document.querySelector('#authError').textContent = '';
 }
+// 3. EVENT LISTENERS
 document.querySelector('#authSwitch').onclick = () => setAuthMode(!registerMode);
+// 4. API CALLS — register/login requests go to the backend
 authForm.onsubmit = async event => {
   event.preventDefault();
   const error = document.querySelector('#authError');
@@ -26,6 +30,7 @@ authForm.onsubmit = async event => {
     loginScreen.classList.add('hidden');
     document.querySelector('.profile b').textContent = data.user.name;
     document.querySelector('.profile span').textContent = data.user.role;
+    window.dispatchEvent(new Event('auth:success'));
   } catch (err) { error.textContent = err.message; }
   finally { submit.disabled = false; submit.textContent = registerMode ? 'Create Account' : 'Sign In'; }
 };
