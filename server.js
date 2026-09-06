@@ -18,10 +18,14 @@ const app = express();
 const port = process.env.PORT || 3000;
 const jwtSecret = process.env.JWT_SECRET || 'change-this-development-jwt-secret';
 const jwtExpiresIn = process.env.JWT_EXPIRES_IN || '30d';
+const adminEmail = (process.env.ADMIN_EMAIL || 'admin@example.com').toLowerCase();
 const incomingWebhookUrl = process.env.INCOMING_WEBHOOK_URL;
 const incomingWebhookSecret = process.env.INCOMING_WEBHOOK_SECRET;
 const deliveryLogs = [];
 const maxDeliveryLogs = 500;
+const scheduledMessages = [];
+const maxScheduledMessages = 500;
+let scheduleRunnerBusy = false;
 let databaseConnected = false;
 let supabase = null;
 
@@ -188,6 +192,43 @@ function getWhatsappId(rawId) {
 function recordDeliveryLog(entry) {
   deliveryLogs.unshift({ id: crypto.randomUUID(), createdAt: new Date().toISOString(), ...entry });
   if (deliveryLogs.length > maxDeliveryLogs) deliveryLogs.length = maxDeliveryLogs;
+}
+
+async function runDueScheduledMessages() {
+  if (scheduleRunnerBusy) return;
+  scheduleRunnerBusy = true;
+  try {
+    const now = Date.now();
+    for (const schedule of scheduledMessages) {
+      if (!['scheduled', 'waiting_for_connection'].includes(schedule.status) || new Date(schedule.scheduledAt).getTime() > now) continue;
+      if (!(await isConnected())) {
+        schedule.status = 'waiting_for_connection';
+        schedule.updatedAt = new Date().toISOString();
+        continue;
+      }
+      schedule.status = 'sending';
+      schedule.updatedAt = new Date().toISOString();
+      const results = [];
+      for (const group of schedule.groups) {
+        try {
+          await client.sendMessage(group.id, schedule.message);
+          results.push({ name: group.name || group.id, status: 'success' });
+          recordDeliveryLog({ status: 'success', source: 'scheduled-message', customerName: group.name || null, phone: group.id, message: schedule.message, reference: schedule.id });
+        } catch (error) {
+          results.push({ name: group.name || group.id, status: 'failed', error: error.message || 'Unknown error' });
+          recordDeliveryLog({ status: 'failed', source: 'scheduled-message', customerName: group.name || null, phone: group.id, message: schedule.message, reference: schedule.id, error: error.message || 'Unknown error' });
+        }
+      }
+      schedule.results = results;
+      schedule.status = results.every(result => result.status === 'success') ? 'sent' : 'failed';
+      schedule.sentAt = new Date().toISOString();
+      schedule.updatedAt = schedule.sentAt;
+    }
+  } catch (error) {
+    console.error('Scheduled message runner failed:', error.message || error);
+  } finally {
+    scheduleRunnerBusy = false;
+  }
 }
 
 // Incoming messages can be forwarded to one configured ERP/CRM webhook. The
@@ -547,6 +588,7 @@ async function initializeWhatsappClient(retryAllowed = true) {
 }
 
 initializeWhatsappClient();
+setInterval(() => runDueScheduledMessages(), 5000);
 
 // Enable basic CORS for local dashboard and file:// clients
 app.use((req, res, next) => {
@@ -588,7 +630,7 @@ app.post('/api/auth/register', async (req, res) => {
     const { data: user, error } = await supabase.auth.admin.createUser({
       email: emailLower,
       password,
-      user_metadata: { name, role: 'Administrator' },
+      user_metadata: { name, role: 'Operator' },
       email_confirm: true
     });
 
@@ -599,13 +641,14 @@ app.post('/api/auth/register', async (req, res) => {
       throw error;
     }
 
-    const token = jwt.sign({ id: user.id, customerId: user.id, role: user.user_metadata?.role || 'Administrator' }, jwtSecret, { expiresIn: jwtExpiresIn });
+    const role = emailLower === adminEmail ? 'Administrator' : 'Operator';
+    const token = jwt.sign({ id: user.id, customerId: user.id, role }, jwtSecret, { expiresIn: jwtExpiresIn });
     res.status(201).json({
       token,
       user: {
         name: user.user_metadata?.name || name,
         email: user.email,
-        role: user.user_metadata?.role || 'Administrator'
+        role
       }
     });
   } catch (error) {
@@ -628,7 +671,7 @@ app.post('/api/auth/login', async (req, res) => {
     if (error || !data?.user) return res.status(401).json({ error: 'Incorrect email or password.' });
 
     const user = data.user;
-    const role = user.user_metadata?.role || 'Operator';
+    const role = emailLower === adminEmail ? 'Administrator' : 'Operator';
     // customerId is server-derived; a caller cannot impersonate another customer.
     const token = jwt.sign({ id: user.id, customerId: user.id, role }, jwtSecret, { expiresIn: jwtExpiresIn });
     res.json({
@@ -641,6 +684,37 @@ app.post('/api/auth/login', async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: error.message || 'Could not authenticate user.' });
+  }
+});
+
+app.get('/api/admin/users', requireApiToken, async (req, res) => {
+  if (req.apiUser.role !== 'Administrator') return res.status(403).json({ error: 'Administrator access is required.' });
+
+  try {
+    const users = [];
+    let page = 1;
+    let hasMore = true;
+    while (hasMore) {
+      const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: 1000 });
+      if (error) throw error;
+      const pageUsers = Array.isArray(data) ? data : data?.users || [];
+      users.push(...pageUsers);
+      hasMore = pageUsers.length === 1000;
+      page += 1;
+    }
+
+    res.json({
+      total: users.length,
+      users: users.map(user => ({
+        id: user.id,
+        name: user.user_metadata?.name || 'Unnamed user',
+        email: user.email || '',
+        role: user.user_metadata?.role || 'Operator',
+        createdAt: user.created_at
+      }))
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message || 'Could not load users.' });
   }
 });
 
@@ -665,6 +739,7 @@ app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
 // Machine-to-machine endpoint for an ERP/billing system. When its order or
 // invoice is saved, it calls this endpoint; no dashboard action is required.
+
 app.post('/api/integration/whatsapp/send', requireApiToken, upload.array('attachments'), async (req, res) => {
   const { phone, message: rawMessage, customerName, reference } = req.body || {};
   const message = typeof rawMessage === 'string' ? rawMessage.trim() : '';
@@ -730,6 +805,33 @@ app.get('/api/whatsapp/logs', (req, res) => {
   const requested = Number.parseInt(req.query.limit, 10);
   const limit = Number.isFinite(requested) ? Math.min(Math.max(requested, 1), 500) : 100;
   res.json({ logs: deliveryLogs.slice(0, limit) });
+});
+
+app.get('/api/whatsapp/schedules', (_req, res) => {
+  res.json({ schedules: [...scheduledMessages].sort((a, b) => new Date(a.scheduledAt) - new Date(b.scheduledAt)) });
+});
+
+app.post('/api/whatsapp/schedules', (req, res) => {
+  const message = typeof req.body?.message === 'string' ? req.body.message.trim() : '';
+  const scheduledAt = new Date(req.body?.scheduledAt);
+  const groups = Array.isArray(req.body?.groups) ? req.body.groups : [];
+  const validGroups = groups.map(group => ({ name: String(group?.name || '').trim(), id: String(group?.id || '').trim() }))
+    .filter(group => group.id.endsWith('@g.us') || group.id.endsWith('@c.us'));
+  if (!message || message.length > 4096) return res.status(400).json({ error: 'message is required and must be 4096 characters or fewer.' });
+  if (!Number.isFinite(scheduledAt.getTime()) || scheduledAt.getTime() <= Date.now()) return res.status(400).json({ error: 'Select a future delivery time.' });
+  if (!validGroups.length) return res.status(400).json({ error: 'Select at least one valid WhatsApp group or contact.' });
+  const schedule = { id: crypto.randomUUID(), message, groups: validGroups, scheduledAt: scheduledAt.toISOString(), status: 'scheduled', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), results: [] };
+  scheduledMessages.push(schedule);
+  if (scheduledMessages.length > maxScheduledMessages) scheduledMessages.shift();
+  return res.status(201).json({ schedule });
+});
+
+app.delete('/api/whatsapp/schedules/:id', (req, res) => {
+  const index = scheduledMessages.findIndex(schedule => schedule.id === req.params.id);
+  if (index < 0) return res.status(404).json({ error: 'Scheduled message was not found.' });
+  if (scheduledMessages[index].status === 'sending') return res.status(409).json({ error: 'This scheduled message is already being sent.' });
+  scheduledMessages.splice(index, 1);
+  return res.json({ success: true });
 });
 
 app.get('/api/whatsapp/status', async (_req, res) => {
@@ -974,4 +1076,3 @@ server.on('error', (error) => {
     process.exit(1);
   }
 });
-

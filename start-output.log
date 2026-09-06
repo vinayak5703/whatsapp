@@ -1,27 +1,56 @@
-MongoDB configuration: {
-  source: 'MONGO_URI',
-  uri: 'mongodb+srv://vinayakbhoskar725_db_user:*****@cluster0.it8jsyy.mongodb.net/whatsapp_messaging_bot?retryWrites=true&w=majority'
+Supabase configuration: {
+  source: 'SUPABASE_SECRET_KEY',
+  url: 'https://isgecgugalucveraghnx.supabase.co'
 }
-Dashboard: http://127.0.0.1:5173
+Supabase client initialized and key validated.
+Starting WhatsApp client with session id: group-messaging-bot session path: C:\Users\Admin\Desktop\projects\whatsapp\.wwebjs_auth\session-group-messaging-bot
+Dashboard: http://127.0.0.1:3000
 WhatsApp QR generated.
-WhatsApp QR generated. Open the dashboard and scan it.
 WhatsApp QR generated.
-WhatsApp QR generated. Open the dashboard and scan it.
 WhatsApp QR generated.
-WhatsApp QR generated. Open the dashboard and scan it.
 WhatsApp QR generated.
-WhatsApp QR generated. Open the dashboard and scan it.
 WhatsApp QR generated.
-WhatsApp QR generated. Open the dashboard and scan it.
 WhatsApp QR generated.
-WhatsApp QR generated. Open the dashboard and scan it.
 WhatsApp QR generated.
-WhatsApp QR generated. Open the dashboard and scan it.
 WhatsApp QR generated.
-WhatsApp QR generated. Open the dashboard and scan it.
 WhatsApp QR generated.
-WhatsApp QR generated. Open the dashboard and scan it.
 WhatsApp QR generated.
-WhatsApp QR generated. Open the dashboard and scan it.
 WhatsApp QR generated.
-WhatsApp QR generated. Open the dashboard and scan it.
+WhatsApp QR generated.
+WhatsApp QR generated.
+WhatsApp QR generated.
+WhatsApp QR generated.
+WhatsApp QR generated.
+WhatsApp QR generated.
+WhatsApp QR generated.
+WhatsApp QR generated.
+WhatsApp QR generated.
+WhatsApp QR generated.
+WhatsApp QR generated.
+WhatsApp QR generated.
+WhatsApp QR generated.
+WhatsApp QR generated.
+WhatsApp QR generated.
+WhatsApp QR generated.
+WhatsApp QR generated.
+WhatsApp QR generated.
+WhatsApp QR generated.
+WhatsApp QR generated.
+WhatsApp QR generated.
+WhatsApp QR generated.
+WhatsApp QR generated.
+WhatsApp QR generated.
+WhatsApp QR generated.
+WhatsApp QR generated.
+WhatsApp QR generated.
+WhatsApp QR generated.
+WhatsApp QR generated.
+WhatsApp QR generated.
+WhatsApp QR generated.
+WhatsApp QR generated.
+WhatsApp QR generated.
+WhatsApp QR generated.
+WhatsApp QR generated.
+WhatsApp QR generated.
+WhatsApp QR generated.
+WhatsApp QR generated.

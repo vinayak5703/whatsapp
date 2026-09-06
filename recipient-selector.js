@@ -9,7 +9,8 @@ function showRecipientToast(message) {
 }
 
 function updateDynamicDashboard() {
-  const store = JSON.parse(localStorage.getItem('wa-bot-data') || '{}');
+  const storageKey = window.getUserDataStorageKey?.() || 'wa-bot-data:guest';
+  const store = JSON.parse(localStorage.getItem(storageKey) || '{}');
   const logs = store.logs || [];
   const successful = logs.filter(log => log.status === 'success').length;
   const failed = logs.filter(log => log.status === 'failed').length;
@@ -105,10 +106,12 @@ async function loadRecipientSelector() {
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || 'Message delivery failed.');
         const sent = result.results.filter(x => x.status === 'success').length;
-        const store = JSON.parse(localStorage.getItem('wa-bot-data') || '{}');
+        const storageKey = window.getUserDataStorageKey?.() || 'wa-bot-data:guest';
+        const store = JSON.parse(localStorage.getItem(storageKey) || '{}');
         store.logs = store.logs || [];
         result.results.forEach(item => store.logs.unshift({ status: item.status, title: `${item.status === 'success' ? 'Message sent' : 'Failed'}: ${item.name}`, message: item.error || message.slice(0, 100), time: new Date().toLocaleString() }));
-        localStorage.setItem('wa-bot-data', JSON.stringify(store));
+        localStorage.setItem(storageKey, JSON.stringify(store));
+        window.dispatchEvent(new Event('delivery:updated'));
         if (typeof db !== 'undefined') db.logs = store.logs;
         if (typeof renderDashboard === 'function') renderDashboard();
         updateDynamicDashboard();
