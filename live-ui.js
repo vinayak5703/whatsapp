@@ -2,6 +2,10 @@
 
 // 2. FUNCTIONS — refresh cards and render scheduled-message screen
 async function refreshLiveDashboard() {
+  // Reading a large WhatsApp directory is expensive. Do not compete with the
+  // recipient selector while the user is composing a message or viewing any
+  // other page.
+  if (window.currentAppPage && window.currentAppPage !== 'Dashboard') return;
   try {
     const [groupsResponse, contactsResponse, logsResponse] = await Promise.all([
       window.apiFetch('/api/whatsapp/groups'),
@@ -88,6 +92,6 @@ document.querySelectorAll('.stat-card').forEach((card, index) => {
 });
 
 refreshLiveDashboard();
-setInterval(refreshLiveDashboard, 5000);
+setInterval(refreshLiveDashboard, 30000);
 window.addEventListener('focus', refreshLiveDashboard);
 window.addEventListener('auth:success', refreshLiveDashboard);

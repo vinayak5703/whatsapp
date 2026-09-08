@@ -119,7 +119,7 @@ setupAttachmentHandlers('#quickAttachments','#quickAttachmentsPreview');
 $('#sendBtn').onclick = async () => {
   const message = $('#message').value.trim();
   const selectedGroups = [...document.querySelectorAll('#quickGroupPicker .quick-group-check:checked')].map(check => ({ name: check.value, id: check.dataset.groupId }));
-  const groupsArr = selectedGroups.length ? selectedGroups : db.groups.filter(g=>g.active);
+  const groupsArr = selectedGroups;
   if ((!message || message.length===0) && (document.querySelector('#quickAttachments')?.files.length===0)) return toast('Message or at least one attachment is required.');
   if (!groupsArr.length) return toast('Select a WhatsApp group.');
 
@@ -131,9 +131,23 @@ $('#sendBtn').onclick = async () => {
     try { toast('Sending message...'); const r = await window.apiFetch('/api/whatsapp/send', { method: 'POST', body: fd }); const data = await r.json(); if (!r.ok) throw new Error(data.error || 'Could not send message.'); data.results.forEach(x=>db.logs.unshift({status:x.status,title:`${x.status==='success'?'Message sent':'Failed'}: ${x.name}`,message:x.error||message.slice(0,100),time:formatTs(x.sentAt||x.attemptedAt)})); save(); renderDashboard(); if(typeof updateDynamicDashboard==='function') updateDynamicDashboard(); window.dispatchEvent(new Event('delivery:updated')); toast(`Sent to ${data.results.filter(x=>x.status==='success').length} of ${data.results.length} groups.`); // reset
       $('#message').value=''; $('#count').textContent=0; document.querySelector('#quickAttachments').value = ''; renderQuickPreview(); } catch (err) { toast(err.message||'Start the Node server and connect WhatsApp first.') }
   } else {
-    // no attachments — use existing queue flow
-    queue(message, target);
-    $('#message').value=''; $('#count').textContent=0;
+    // Send the exact checked group IDs. `target` was never defined here, so
+    // the old queue() path failed whenever no attachment was selected.
+    try {
+      toast('Sending message...');
+      const response = await window.apiFetch('/api/whatsapp/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message, groups: groupsArr })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Could not send message.');
+      data.results.forEach(item => db.logs.unshift({ status: item.status, title: `${item.status === 'success' ? 'Message sent' : 'Failed'}: ${item.name}`, message: item.error || message.slice(0, 100), time: formatTs(item.sentAt || item.attemptedAt) }));
+      save(); renderDashboard();
+      window.dispatchEvent(new Event('delivery:updated'));
+      toast(`Sent to ${data.results.filter(item => item.status === 'success').length} of ${data.results.length} groups.`);
+      $('#message').value = ''; $('#count').textContent = 0;
+    } catch (error) { toast(error.message || 'Could not send message.'); }
   }
 };
 const modal=$('#modal');$('#scheduleBtn').onclick=()=>modal.classList.add('open');$('#closeModal').onclick=()=>modal.classList.remove('open');$('#saveSchedule').onclick=()=>{let m=$('#scheduleMessage').value,t=$('#scheduleTime').value;if(!m||!t)return toast('Enter message and time.');db.schedules.push({id:Date.now(),message:m,groups:'Selected groups',time:new Date(t).toLocaleString()});save();modal.classList.remove('open');renderDashboard();toast('Schedule saved.')};

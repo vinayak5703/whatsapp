@@ -36,12 +36,7 @@ async function loadRecipientSelector() {
       <label>Select recipients</label>
       <input id="recipientSearch" placeholder="Search groups or contacts" style="margin-bottom:10px" />
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin:0 0 10px"><button class="outline selection-action" type="button" data-select="groups">Select all groups</button><button class="outline selection-action" type="button" data-select="contacts">Select all contacts</button><button class="outline selection-action" type="button" data-select="visible">Select visible</button><button class="outline selection-action" type="button" data-select="none">Clear selection</button><span id="selectionCount" style="padding:9px 2px;color:#71808e">0 selected</span></div>
-      <div id="recipientChoices" style="max-height:330px;overflow:auto;border:1px solid #dce2e6;border-radius:5px;padding:8px">
-        <b style="display:block;margin:5px 5px 8px">Groups (${groups.length})</b>
-        ${groups.map(x => `<label class="recipient-option" style="display:flex;gap:9px;align-items:center;padding:7px 5px;margin:0"><input class="recipient-check" type="checkbox" data-id="${x.id}" data-name="${x.name}" data-type="group"> <span>${x.name} <small style="color:#71808e">Group</small></span></label>`).join('')}
-        <b style="display:block;margin:14px 5px 8px">WhatsApp contacts (${contacts.length})</b>
-        ${contacts.map(x => `<label class="recipient-option" style="display:flex;gap:9px;align-items:center;padding:7px 5px;margin:0"><input class="recipient-check" type="checkbox" data-id="${x.id}" data-name="${x.name}" data-type="contact"> <span>${x.name} <small style="color:#71808e">Contact</small></span></label>`).join('')}
-      </div>
+      <div id="recipientChoices" style="max-height:330px;overflow:auto;border:1px solid #dce2e6;border-radius:5px;padding:8px"></div>
       <label>Attachments</label>
       <div class="media-upload-grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">
         <label style="margin:0">🖼️ Images<input data-send-attachment type="file" multiple accept="image/*" /></label>
@@ -52,20 +47,41 @@ async function loadRecipientSelector() {
       <div id="attachmentsPreview" style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"></div>
       <p style="color:#71808e;font-size:12px;margin-top:8px">Select multiple files in each section. Max 25MB per file; message becomes the first attachment caption.</p>
       <button class="primary" style="margin-top:14px">Send to selected</button>`;
-    document.querySelector('#recipientSearch').oninput = event => {
-      const search = event.target.value.toLowerCase();
-      document.querySelectorAll('.recipient-option').forEach(item => item.style.display = item.textContent.toLowerCase().includes(search) ? 'flex' : 'none');
+    // Never create thousands of checkbox elements at once. The full list stays
+    // in JavaScript and this viewport renders only a small page of matching
+    // recipients, keeping 1,000 groups / 2,000 contacts responsive.
+    const allRecipients = [...groups.map(item => ({ ...item, type: 'group' })), ...contacts.map(item => ({ ...item, type: 'contact' }))];
+    const selectedRecipients = new Map();
+    const pageSize = 100;
+    let visibleCount = pageSize;
+    let searchTerm = '';
+    const escapeHtml = value => String(value || '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+    const updateSelectionCount = () => { document.querySelector('#selectionCount').textContent = `${selectedRecipients.size} selected`; };
+    const matches = () => allRecipients.filter(item => `${item.name} ${item.id}`.toLowerCase().includes(searchTerm));
+    const renderRecipients = () => {
+      const matching = matches();
+      const shown = matching.slice(0, visibleCount);
+      const choices = document.querySelector('#recipientChoices');
+      choices.innerHTML = `<p style="margin:4px 5px 9px;color:#71808e">${matching.length.toLocaleString()} matching — showing ${shown.length.toLocaleString()}</p>${shown.map(item => `<label class="recipient-option" style="display:flex;gap:9px;align-items:center;padding:7px 5px;margin:0"><input class="recipient-check" type="checkbox" data-id="${escapeHtml(item.id)}" ${selectedRecipients.has(item.id) ? 'checked' : ''}> <span>${escapeHtml(item.name)} <small style="color:#71808e">${item.type === 'group' ? 'Group' : 'Contact'}</small></span></label>`).join('')}${matching.length > shown.length ? '<button type="button" class="outline" id="showMoreRecipients" style="margin:9px 5px">Show 100 more</button>' : ''}`;
+      choices.querySelectorAll('.recipient-check').forEach(input => input.onchange = () => {
+        const item = allRecipients.find(recipient => recipient.id === input.dataset.id);
+        if (input.checked && item) selectedRecipients.set(item.id, item);
+        else selectedRecipients.delete(input.dataset.id);
+        updateSelectionCount();
+      });
+      choices.querySelector('#showMoreRecipients')?.addEventListener('click', () => { visibleCount += pageSize; renderRecipients(); });
     };
-    const updateSelectionCount = () => { document.querySelector('#selectionCount').textContent = `${document.querySelectorAll('.recipient-check:checked').length} selected`; };
-    document.querySelectorAll('.recipient-check').forEach(input => input.onchange = updateSelectionCount);
+    document.querySelector('#recipientSearch').oninput = event => { searchTerm = event.target.value.trim().toLowerCase(); visibleCount = pageSize; renderRecipients(); };
     document.querySelectorAll('.selection-action').forEach(button => button.onclick = () => {
       const mode = button.dataset.select;
-      document.querySelectorAll('.recipient-check').forEach(input => {
-        const visible = input.closest('.recipient-option').style.display !== 'none';
-        input.checked = mode === 'none' ? false : mode === 'visible' ? visible : input.dataset.type === (mode === 'groups' ? 'group' : 'contact');
-      });
-      updateSelectionCount();
+      if (mode === 'none') selectedRecipients.clear();
+      else {
+        const source = mode === 'visible' ? matches() : allRecipients.filter(item => item.type === (mode === 'groups' ? 'group' : 'contact'));
+        source.forEach(item => selectedRecipients.set(item.id, item));
+      }
+      updateSelectionCount(); renderRecipients();
     });
+    renderRecipients();
     const renderPreview = () => {
       const preview = document.querySelector('#attachmentsPreview');
       if (!preview) return;
@@ -88,7 +104,7 @@ async function loadRecipientSelector() {
     form.onsubmit = async event => {
       event.preventDefault();
       const message = new FormData(form).get('message');
-      const recipients = [...document.querySelectorAll('.recipient-check:checked')].map(input => ({ id: input.dataset.id, name: input.dataset.name, type: input.dataset.type }));
+      const recipients = Array.from(selectedRecipients.values());
       if (!recipients.length) return showRecipientToast('Select at least one group or contact.');
       showRecipientToast('Sending message...');
       try {

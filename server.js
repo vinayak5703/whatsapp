@@ -278,6 +278,29 @@ function isWhatsappGroup(item) {
 
 const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 const isTransientWhatsappFrameError = error => /Execution context was destroyed|detached Frame|Target closed|Session closed|frame was detached/i.test(error?.message || String(error));
+// A connected account's directory does not need to be re-read on every UI
+// refresh. Keeping it for a minute prevents expensive WhatsApp-Web scans when
+// the account has thousands of chats.
+const directoryCacheTtlMs = 60000;
+let directoryCache = { chats: [], contacts: [], updatedAt: 0 };
+let directoryReadPromise = null;
+let directorySyncState = 'idle';
+function reportDirectoryReadError(operation, error) {
+  // WhatsApp Web can throw an opaque one-letter Puppeteer error while its
+  // injected helper is rebuilding. The raw collection fallback below is the
+  // recovery path, so this expected transient error must not flood the server
+  // terminal. Keep the values referenced for debugger breakpoints.
+  void operation;
+  void error;
+}
+
+function withTimeout(promise, milliseconds, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${milliseconds / 1000} seconds.`)), milliseconds);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
 
 function dedupeItems(items) {
   const seen = new Map();
@@ -299,12 +322,12 @@ async function getWhatsappChats() {
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         if (whatsappClient !== client) return [];
-        const chats = normalizeWhatsappCollection(await whatsappClient.getChats());
+        const chats = normalizeWhatsappCollection(await withTimeout(whatsappClient.getChats(), 12000, 'Reading WhatsApp chats'));
         if (chats.length) return dedupeItems(chats);
         break;
       } catch (error) {
         if (!isTransientWhatsappFrameError(error) || attempt === 3) {
-          console.error('getWhatsappChats client.getChats error:', error.message || error);
+          reportDirectoryReadError('getWhatsappChats', error);
           break;
         }
         await wait(attempt * 400);
@@ -312,12 +335,17 @@ async function getWhatsappChats() {
     }
   }
 
+  // A current client already provides the supported method. Its fallback below
+  // hits the same injected WhatsApp-Web API, so retrying it only creates the
+  // repeated getChats/Promise-collected error loop.
   for (let attempt = 1; attempt <= 3; attempt++) {
     if (whatsappClient !== client) return [];
     const page = whatsappClient.pupPage;
     if (!page) break;
     try {
-      await page.waitForFunction('window.WWebJS != undefined', { timeout: 5000 });
+      await page.waitForFunction(() => {
+        try { return Boolean(window.require?.('WAWebCollections')?.Chat); } catch { return false; }
+      }, { timeout: 10000 });
       const fallbackChats = await page.evaluate(async () => {
         const getArray = value => {
           if (!value) return [];
@@ -334,33 +362,32 @@ async function getWhatsappChats() {
           return Object.values(value || {});
         };
 
-        const rawChats = window.WWebJS && typeof window.WWebJS.getChats === 'function'
-          ? await window.WWebJS.getChats()
-          : null;
-        let chats = getArray(rawChats);
-        if (!chats.length && window.require) {
-          const collection = window.require('WAWebCollections')?.Chat?.getModelsArray?.();
-          chats = getArray(collection);
-        }
+        // Do not call window.WWebJS.getChats here: that is exactly the helper
+        // that failed above. Read the already-loaded WhatsApp collection.
+        const collection = window.require?.('WAWebCollections')?.Chat;
+        let chats = getArray(collection?.getModelsArray?.() || collection?._models || collection?.models);
 
         chats = Array.isArray(chats) ? chats : Object.values(chats || {});
 
-        return chats.map(chat => ({
-          id: chat?.id?._serialized || chat?.id || '',
-          name: chat?.formattedTitle || chat?.name || chat?.contact?.name || chat?.contact?.pushname || '',
-          isGroup: chat?.isGroup,
-          groupMetadata: chat?.groupMetadata,
-          contact: chat?.contact ? {
-            id: chat.contact?.id?._serialized || chat.contact?.id || '',
-            name: chat.contact?.name || chat.contact?.pushname || chat.contact?.formattedName || ''
-          } : undefined,
-          formattedTitle: chat?.formattedTitle,
-        }));
+        return chats.map(chat => {
+          const data = typeof chat?.serialize === 'function' ? chat.serialize() : {};
+          const contact = chat?.contact || data?.contact || {};
+          const id = chat?.id?._serialized || data?.id?._serialized || data?.id || chat?.id || '';
+          const name = chat?.formattedTitle || data?.formattedTitle || chat?.name || data?.name ||
+            chat?.groupMetadata?.subject || data?.groupMetadata?.subject || contact?.formattedName ||
+            contact?.name || contact?.pushname || contact?.verifiedName || '';
+          return {
+            id: typeof id === 'string' ? id : id?._serialized || '',
+            name,
+            isGroup: Boolean(chat?.isGroup || data?.isGroup || chat?.groupMetadata || data?.groupMetadata),
+            formattedTitle: chat?.formattedTitle || data?.formattedTitle || name,
+          };
+        });
       });
       if (Array.isArray(fallbackChats)) return dedupeItems(fallbackChats);
     } catch (error) {
       if (!isTransientWhatsappFrameError(error) || attempt === 3) {
-        console.error('getWhatsappChats fallback error:', error.message || error);
+        reportDirectoryReadError('getWhatsappChats fallback', error);
         break;
       }
       await wait(attempt * 400);
@@ -378,12 +405,12 @@ async function getWhatsappContacts() {
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         if (whatsappClient !== client) return [];
-        const contacts = normalizeWhatsappCollection(await whatsappClient.getContacts());
+        const contacts = normalizeWhatsappCollection(await withTimeout(whatsappClient.getContacts(), 12000, 'Reading WhatsApp contacts'));
         if (contacts.length) return dedupeItems(contacts);
         break;
       } catch (error) {
         if (!isTransientWhatsappFrameError(error) || attempt === 3) {
-          console.error('getWhatsappContacts client.getContacts error:', error.message || error);
+          reportDirectoryReadError('getWhatsappContacts', error);
           break;
         }
         await wait(attempt * 400);
@@ -396,7 +423,9 @@ async function getWhatsappContacts() {
     const page = whatsappClient.pupPage;
     if (!page) break;
     try {
-      await page.waitForFunction('window.WWebJS != undefined', { timeout: 5000 });
+      await page.waitForFunction(() => {
+        try { return Boolean(window.require?.('WAWebCollections')?.Contact); } catch { return false; }
+      }, { timeout: 10000 });
       const fallbackContacts = await page.evaluate(async () => {
         const getArray = value => {
           if (!value) return [];
@@ -413,31 +442,40 @@ async function getWhatsappContacts() {
           return Object.values(value || {});
         };
 
-        const rawContacts = window.WWebJS && typeof window.WWebJS.getContacts === 'function'
-          ? await window.WWebJS.getContacts()
-          : null;
-        let contacts = getArray(rawContacts);
-        if (!contacts.length && window.require) {
-          const collection = window.require('WAWebCollections')?.Contact?.getModelsArray?.();
-          contacts = getArray(collection);
-        }
+        // Keep this independent of window.WWebJS.getContacts, which can be
+        // unavailable after a WhatsApp Web update.
+        const collection = window.require?.('WAWebCollections')?.Contact;
+        let contacts = getArray(collection?.getModelsArray?.() || collection?._models || collection?.models);
+        let contactGetters;
+        let getIsMyContact;
+        try {
+          contactGetters = window.require?.('WAWebContactGetters');
+          getIsMyContact = window.require?.('WAWebFrontendContactGetters')?.getIsMyContact;
+        } catch {}
 
         contacts = Array.isArray(contacts) ? contacts : Object.values(contacts || {});
 
-        return contacts.map(contact => ({
-          id: contact?.id?._serialized || contact?.id || '',
-          formattedName: contact?.formattedName,
-          pushname: contact?.pushname,
-          name: contact?.name,
-          shortName: contact?.shortName,
-          verifiedName: contact?.verifiedName,
-          isGroup: contact?.isGroup,
-        }));
+        return contacts.map(contact => {
+          const data = typeof contact?.serialize === 'function' ? contact.serialize() : {};
+          const id = contact?.id?._serialized || data?.id?._serialized || data?.id || contact?.id || '';
+          return {
+            id: typeof id === 'string' ? id : id?._serialized || '',
+            formattedName: contact?.formattedName || data?.formattedName || data?.displayName || '',
+            pushname: contact?.pushname || data?.pushname || '',
+            name: contact?.name || data?.name || '',
+            shortName: contact?.shortName || data?.shortName || '',
+          verifiedName: contact?.verifiedName || data?.verifiedName || '',
+          isGroup: Boolean(contact?.isGroup || data?.isGroup || contact?.groupMetadata || data?.groupMetadata),
+          isUser: contact?.isUser ?? data?.isUser ?? Boolean(contactGetters?.getIsUser?.(contact)),
+          isWAContact: contact?.isWAContact ?? data?.isWAContact ?? Boolean(contactGetters?.getIsWAContact?.(contact)),
+          isMyContact: contact?.isMyContact ?? data?.isMyContact ?? Boolean(getIsMyContact?.(contact)),
+        };
+        });
       });
       if (Array.isArray(fallbackContacts)) return dedupeItems(fallbackContacts);
     } catch (error) {
       if (!isTransientWhatsappFrameError(error) || attempt === 3) {
-        console.error('getWhatsappContacts fallback error:', error.message || error);
+        reportDirectoryReadError('getWhatsappContacts fallback', error);
         break;
       }
       await wait(attempt * 400);
@@ -446,7 +484,6 @@ async function getWhatsappContacts() {
 
   return [];
 }
-
 async function getWhatsappGroups() {
   // WhatsApp reports CONNECTED before its local chat store is always ready.
   // Retry briefly instead of returning an intermittent empty group list.
@@ -461,6 +498,32 @@ async function getWhatsappGroups() {
     if (attempt < 3) await wait(1000 * attempt);
   }
   return [];
+}
+
+async function getWhatsappDirectory() {
+  if (Date.now() - directoryCache.updatedAt < directoryCacheTtlMs) return directoryCache;
+  if (directoryReadPromise) return directoryReadPromise;
+
+  const clientAtStart = client;
+  directorySyncState = 'syncing';
+  directoryReadPromise = (async () => {
+    // Keep Puppeteer calls sequential and share this refresh across the Groups
+    // and Contacts requests made by the dashboard.
+    const chats = await getWhatsappChats();
+    const contacts = clientAtStart === client ? await getWhatsappContacts() : [];
+    if (clientAtStart === client) {
+      directoryCache = { chats, contacts, updatedAt: Date.now() };
+      directorySyncState = 'ready';
+    }
+    return directoryCache;
+  })();
+
+  try {
+    return await directoryReadPromise;
+  } finally {
+    directoryReadPromise = null;
+    if (directorySyncState === 'syncing') directorySyncState = 'idle';
+  }
 }
 
 
@@ -491,6 +554,8 @@ async function safeDestroyWhatsappClient() {
 
   client = null;
   state = 'starting';
+  directoryCache = { chats: [], contacts: [], updatedAt: 0 };
+  directorySyncState = 'idle';
 }
 
 function registerEvents() {
@@ -508,7 +573,19 @@ function registerEvents() {
     state = 'connected';
     qrDataUrl = null;
     account = client.info?.wid?.user || null;
+    directoryCache = { chats: [], contacts: [], updatedAt: 0 };
+    directorySyncState = 'syncing';
     console.log('WhatsApp connected.');
+    // Let WhatsApp Web finish hydrating its local collections, then read them
+    // once in the background. Pages opened afterwards receive the complete
+    // cached directory instead of initiating a slow independent scan.
+    const connectedClient = client;
+    setTimeout(() => {
+      if (client !== connectedClient || state !== 'connected') return;
+      getWhatsappDirectory()
+        .then(directory => console.log(`WhatsApp directory synced: ${directory.chats.length} chats, ${directory.contacts.length} contacts.`))
+        .catch(() => { directorySyncState = 'idle'; });
+    }, 3000);
   });
 
   client.on('message', message => {
@@ -528,6 +605,8 @@ function registerEvents() {
   client.on('disconnected', reason => {
     state = 'disconnected';
     account = null;
+    directoryCache = { chats: [], contacts: [], updatedAt: 0 };
+    directorySyncState = 'idle';
     console.log('WhatsApp disconnected:', reason);
   });
 }
@@ -555,6 +634,7 @@ async function initializeWhatsappClient(retryAllowed = true) {
     }),
     puppeteer: {
       headless: true,
+    //   protocolTimeout: 120000,
       executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
       args: puppeteerArgs
     }
@@ -841,7 +921,7 @@ app.get('/api/whatsapp/status', async (_req, res) => {
     await initializeWhatsappClient();
   }
   await isConnected();
-  res.json({ state, account, qr: qrDataUrl, error: lastConnectionError });
+  res.json({ state, account, qr: qrDataUrl, directorySyncState, error: lastConnectionError });
 });
 
 app.post('/api/whatsapp/disconnect', async (_req, res) => {
@@ -897,7 +977,7 @@ app.post('/api/whatsapp/disconnect', async (_req, res) => {
       console.error('Could not remove session folder after retries. It may be locked by another process.');
       // Do not treat this as a fatal error for the API: return helpful message so user can take manual action
       account = null;
-      client.removeAllListeners && client.removeAllListeners();
+      client?.removeAllListeners?.();
       try { client = null; } catch {};
       state = 'starting';
 
@@ -907,6 +987,9 @@ app.post('/api/whatsapp/disconnect', async (_req, res) => {
     }
 
     account = null;
+    deliveryLogs.length = 0;
+    scheduledMessages.length = 0;
+    directoryCache = { chats: [], contacts: [], updatedAt: 0 };
     state = 'starting';
 
     setTimeout(() => { initializeWhatsappClient(); }, 2000);
@@ -922,7 +1005,11 @@ app.post('/api/whatsapp/disconnect', async (_req, res) => {
 app.get('/api/whatsapp/groups', async (_req, res) => {
   if (!(await isConnected())) return res.status(409).json({ error: 'WhatsApp is not connected.' });
   try {
-    const groupItems = await getWhatsappGroups();
+    const directory = await getWhatsappDirectory();
+    const groupsFromChats = directory.chats.filter(isWhatsappGroup);
+    const groupItems = groupsFromChats.length
+      ? groupsFromChats
+      : directory.contacts.filter(isWhatsappGroup);
     const groups = dedupeItems(groupItems
       .map(group => {
         const id = getWhatsappId(group.id) || getWhatsappId(group.wid);
@@ -944,14 +1031,11 @@ app.get('/api/whatsapp/groups', async (_req, res) => {
 app.get('/api/whatsapp/contacts', async (_req, res) => {
   if (!(await isConnected())) return res.status(409).json({ error: 'WhatsApp is not connected.' });
   try {
-    let contactsData = [];
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      contactsData = await getWhatsappContacts();
-      if (contactsData.length || attempt === 3) break;
-      await wait(1000 * attempt);
-    }
+    const { contacts: contactsData } = await getWhatsappDirectory();
     const contacts = dedupeItems((Array.isArray(contactsData) ? contactsData : [])
-      .filter(contact => !contact?.isGroup && contact?.id)
+      // The low-level WhatsApp store can include tens of thousands of internal
+      // directory records. Only expose saved, registered person contacts.
+      .filter(contact => !contact?.isGroup && contact?.id && contact.isUser === true && contact.isWAContact === true && contact.isMyContact === true)
       .map(contact => {
         const id = getWhatsappId(contact.id) || (typeof contact.id === 'string' ? contact.id : contact?.id?.user || '');
         return {
@@ -961,7 +1045,7 @@ app.get('/api/whatsapp/contacts', async (_req, res) => {
           type: 'contact',
         };
       }))
-      .filter(contact => contact.name && contact.id && contact.id.endsWith('@c.us'));
+      .filter(contact => contact.name && contact.id && /@(c\.us|lid)$/.test(contact.id));
 
     res.json({ count: contacts.length, contacts });
   } catch (error) {
@@ -998,7 +1082,7 @@ app.post('/api/whatsapp/send', upload.array('attachments'), async (req, res) => 
 
   const results = [];
   let chats = [];
-  if (targets.some(group => !String(group.id || '').trim().match(/@(g|c)\.us$/))) {
+  if (targets.some(group => !String(group.id || '').trim().match(/@(g\.us|c\.us|lid)$/))) {
     try {
       chats = await getWhatsappChats();
       if (!Array.isArray(chats) || chats.length === 0) {
@@ -1019,7 +1103,7 @@ app.post('/api/whatsapp/send', upload.array('attachments'), async (req, res) => 
 
   for (const group of targets) {
     let id = String(group.id || '').trim();
-    if (!id.match(/@(g|c)\.us$/)) {
+    if (!id.match(/@(g\.us|c\.us|lid)$/)) {
       const matchingGroup = chats.find(chat => chat.isGroup && chat.name === group.name);
       id = matchingGroup?.id?._serialized || '';
     }

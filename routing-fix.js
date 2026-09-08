@@ -41,6 +41,7 @@
   }
 
   function renderQuickGroupPicker() {
+    const selectedIds = window.__quickSelectedGroupIds || new Set();
     let picker = document.querySelector('#quickGroupPicker');
     const legacySelect = document.querySelector('.group-select select');
     const legacyButton = document.querySelector('.group-select button');
@@ -50,13 +51,21 @@
       legacySelect.parentElement.insertBefore(picker, legacySelect);
     }
     if (!picker || typeof db === 'undefined') return;
+    const activeGroups = db.groups.filter(group => group.active);
+    const groupSignature = activeGroups.map(group => `${group.id}|${group.name}`).join('\n');
+    // This function is invoked by a legacy one-second timer. Avoid rebuilding
+    // hundreds or thousands of checkbox nodes unless the group data changed.
+    if (picker.dataset.groupSignature === groupSignature) return;
     if (legacySelect) legacySelect.classList.add('hidden');
     if (legacyButton) legacyButton.classList.add('hidden');
-    picker.innerHTML = `<label class="quick-group-all"><input type="checkbox" id="quickSelectAll"> Select all groups</label><div class="quick-group-options">${db.groups.filter(group => group.active).map(group => `<label><input type="checkbox" class="quick-group-check" value="${e(group.name)}" data-group-id="${e(group.id)}"> ${e(group.name)}</label>`).join('')}</div>`;
+    picker.innerHTML = `<label class="quick-group-all"><input type="checkbox" id="quickSelectAll"> Select all groups</label><div class="quick-group-options">${activeGroups.map(group => `<label><input type="checkbox" class="quick-group-check" value="${e(group.name)}" data-group-id="${e(group.id)}" ${selectedIds.has(group.id) ? 'checked' : ''}> ${e(group.name)}</label>`).join('')}</div>`;
+    picker.dataset.groupSignature = groupSignature;
     const all = picker.querySelector('#quickSelectAll');
     const checks = [...picker.querySelectorAll('.quick-group-check')];
-    all.onchange = () => checks.forEach(check => { check.checked = all.checked; });
-    checks.forEach(check => check.onchange = () => { all.checked = checks.length > 0 && checks.every(item => item.checked); });
+    all.checked = checks.length > 0 && checks.every(check => check.checked);
+    all.onchange = () => checks.forEach(check => { check.checked = all.checked; if (all.checked) selectedIds.add(check.dataset.groupId); else selectedIds.delete(check.dataset.groupId); });
+    checks.forEach(check => check.onchange = () => { if (check.checked) selectedIds.add(check.dataset.groupId); else selectedIds.delete(check.dataset.groupId); all.checked = checks.length > 0 && checks.every(item => item.checked); });
+    window.__quickSelectedGroupIds = selectedIds;
   }
 
   window.addEventListener('delivery:updated', () => {
@@ -167,6 +176,8 @@
   }, true);
   routeFromHash();
   setTimeout(routeFromHash, 0);
-  setInterval(() => { if (window.currentAppPage === 'Dashboard') refreshDeliveryMetrics(); }, 1000);
-  setInterval(() => { if (window.currentAppPage === 'Dashboard') renderQuickGroupPicker(); }, 1000);
+  // These panels are also refreshed immediately after a delivery event. A
+  // five-second fallback is sufficient and avoids needless main-thread work.
+  setInterval(() => { if (window.currentAppPage === 'Dashboard') refreshDeliveryMetrics(); }, 5000);
+  setInterval(() => { if (window.currentAppPage === 'Dashboard') renderQuickGroupPicker(); }, 5000);
 })();
