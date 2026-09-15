@@ -683,7 +683,7 @@ app.use((req, res, next) => {
 
 // JSON body parsing for API endpoints
 app.use(express.json({ limit: '5mb' }));
-app.use(express.static('.'));
+app.use(express.static(path.join(process.cwd(), '..', 'frontend')));
 
 // Multer setup for handling attachments in /api/whatsapp/send
 const uploadDir = path.join(process.cwd(), '.uploads_tmp');
